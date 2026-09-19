@@ -25,6 +25,11 @@ function createServerEnv() {
 				.describe(
 					"32 byte hex string for encrypting values like AWS access keys",
 				),
+			HYATUS_CAP_INTROSPECTION_URL: z.string().url().optional(),
+			CAP_SOURCE_REVISION: z
+				.string()
+				.regex(/^[0-9a-f]{40}$/i)
+				.optional(),
 
 			// Cap uses Resend for email sending, including sending login code emails
 			RESEND_API_KEY: z.string().optional(),

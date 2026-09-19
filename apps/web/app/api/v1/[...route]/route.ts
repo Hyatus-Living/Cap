@@ -27,6 +27,8 @@ import {
 	getGoogleDriveFolderLocation,
 	getGoogleDriveUserEmail,
 	ImageUploads,
+	introspectHyatusCapToken,
+	linkHyatusCapIdentity,
 	resolveEffectiveVideoRules,
 	Storage,
 	Videos,
@@ -315,6 +317,18 @@ const forbidden = (requestId: string, message = "Access is not allowed") =>
 	new Agent.AgentForbiddenError({
 		...commonError(requestId, message),
 		code: "FORBIDDEN",
+	});
+
+const authenticationRequired = (requestId: string, message: string) =>
+	new Agent.AgentAuthenticationError({
+		...commonError(requestId, message),
+		code: "AUTH_REQUIRED",
+	});
+
+const conflict = (requestId: string, message: string) =>
+	new Agent.AgentConflictError({
+		...commonError(requestId, message),
+		code: "CONFLICT",
 	});
 
 const passwordRequired = (requestId: string) =>
@@ -8992,6 +9006,68 @@ const AgentAuthHandlersLive = HttpApiBuilder.group(
 							temporarilyUnavailable(
 								requestId,
 								"Authentication is temporarily unavailable",
+							),
+						),
+					),
+					Effect.tapErrorCause(Effect.logError),
+				);
+			})
+			.handle("linkHyatusIdentity", ({ payload }) => {
+				const requestId = makeRequestId();
+				return Effect.gen(function* () {
+					const principal = yield* Agent.AgentPrincipal;
+					if (principal.tokenKind === "delegated") {
+						return yield* forbidden(
+							requestId,
+							"Linking requires an existing Cap credential",
+						);
+					}
+					const context = yield* introspectHyatusCapToken(
+						payload.delegatedToken,
+					).pipe(
+						Effect.mapError((error) =>
+							error.kind === "unavailable"
+								? temporarilyUnavailable(
+										requestId,
+										"Hyatus authentication is temporarily unavailable",
+									)
+								: authenticationRequired(
+										requestId,
+										"The delegated Hyatus credential is invalid or expired",
+									),
+						),
+					);
+					const database = yield* Database;
+					const result = yield* linkHyatusCapIdentity(
+						database,
+						context,
+						principal.id,
+					);
+					if (result.state === "email_mismatch") {
+						return yield* forbidden(
+							requestId,
+							"The verified Cap and Hyatus email addresses must match",
+						);
+					}
+					if (result.state === "invalid_user") {
+						return yield* forbidden(
+							requestId,
+							"The Cap account is not eligible for identity linking",
+						);
+					}
+					if (result.state !== "linked") {
+						return yield* conflict(
+							requestId,
+							"The Hyatus identity or Cap account is already linked",
+						);
+					}
+					return { linked: true as const, requestId };
+				}).pipe(
+					Effect.catchTag("DatabaseError", () =>
+						Effect.fail(
+							temporarilyUnavailable(
+								requestId,
+								"Identity linking is temporarily unavailable",
 							),
 						),
 					),

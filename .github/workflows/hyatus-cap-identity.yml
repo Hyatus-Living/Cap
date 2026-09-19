@@ -1,0 +1,38 @@
+name: Hyatus Cap identity
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: cap-ci-only
+          MYSQL_DATABASE: cap_hyatus_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pcap-ci-only"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: mysql://root:cap-ci-only@127.0.0.1:3306/cap_hyatus_ci
+      CAP_HYATUS_TEST_DATABASE_URL: mysql://root:cap-ci-only@127.0.0.1:3306/cap_hyatus_ci
+      WEB_URL: https://videos.gptguest.com
+      NEXT_PUBLIC_DOCKER_BUILD: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run db:push
+      - run: bun run --filter=@cap/web test -- __tests__/unit/hyatus-cap-auth.test.ts __tests__/integration/hyatus-cap-database.test.ts

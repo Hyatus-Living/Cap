@@ -36,7 +36,7 @@ const MotionLogoBadge = motion(LogoBadge);
 const MotionLink = motion(Link);
 const MotionButton = motion(Button);
 
-export function LoginForm() {
+export function LoginForm({ sourceUrl }: { sourceUrl: string }) {
 	const searchParams = useSearchParams();
 	const router = useRouter();
 	const next = searchParams?.get("next");
@@ -458,6 +458,16 @@ export function LoginForm() {
 							</Link>
 							.
 						</motion.p>
+						<p className="pt-2 text-xs text-center text-gray-9">
+							<a
+								href={sourceUrl}
+								target="_blank"
+								rel="noreferrer"
+								className="font-semibold text-gray-12 hover:text-blue-300"
+							>
+								Deployment source code
+							</a>
+						</p>
 					</motion.div>
 				</Suspense>
 			</motion.div>
