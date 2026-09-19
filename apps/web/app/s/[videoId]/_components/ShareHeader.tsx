@@ -485,6 +485,7 @@ export const ShareHeader = ({
 	 */
 	const audience = describeShareAudience({
 		isPublic: Boolean(data.public),
+		hyatusOnly: Boolean(data.hyatusOnly),
 		passwordProtected: effectivePasswordProtected,
 		audienceNames: [
 			...(sharedOrganizations ?? []).map((org) => org.name),
@@ -508,9 +509,11 @@ export const ShareHeader = ({
 		const AudienceIcon =
 			audience.kind === "public"
 				? Globe2
-				: audience.kind === "spaces"
+				: audience.kind === "hyatus"
 					? Users
-					: Lock;
+					: audience.kind === "spaces"
+						? Users
+						: Lock;
 
 		return (
 			<Tooltip content={audience.tooltip} position="bottom">
@@ -748,6 +751,7 @@ export const ShareHeader = ({
 					sharedSpaces={effectiveSharedSpaces || []}
 					onSharingUpdated={handleSharingUpdated}
 					isPublic={data.public}
+					hyatusOnly={data.hyatusOnly}
 					spacesData={spacesData}
 					hasPassword={passwordProtected}
 					inheritedPasswordSources={data.inheritedPasswordSources}
@@ -764,6 +768,7 @@ export const ShareHeader = ({
 					videoTitle={displayTitle}
 					shareUrl={getVideoLink()}
 					isPublic={Boolean(data.public)}
+					hyatusOnly={Boolean(data.hyatusOnly)}
 					canManageAccess={Boolean(isOwner)}
 					onManageAccess={() => {
 						setIsShareLinkDialogOpen(false);

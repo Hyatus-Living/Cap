@@ -449,6 +449,7 @@ export const videos = mysqlTable(
 		fps: int("fps"),
 		metadata: json("metadata").$type<VideoMetadata>(),
 		public: boolean("public").notNull().default(true),
+		hyatusOnly: boolean("hyatusOnly").notNull().default(false),
 		settings: json("settings").$type<{
 			disableSummary?: boolean;
 			disableCaptions?: boolean;

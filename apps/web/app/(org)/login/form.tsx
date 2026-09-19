@@ -98,6 +98,18 @@ export function LoginForm({ sourceUrl }: { sourceUrl: string }) {
 				return;
 			} else if (error === "SignupBlocked") {
 				return;
+			} else if (error === "HyatusLinkRequired") {
+				return toast.error(
+					"Your Hyatus email already has a Cap account. Link that account before continuing with Hyatus.",
+				);
+			} else if (error === "HyatusSessionExpired") {
+				return toast.error(
+					"Your Hyatus sign-in session expired. Start the Hyatus sign-in again.",
+				);
+			} else if (error === "HyatusSignInFailed") {
+				return toast.error(
+					"Hyatus sign-in could not be completed. Try again or contact your administrator.",
+				);
 			} else if (error === "SsoSessionExpired") {
 				setShowOrgInput(true);
 				return toast.error(
@@ -175,6 +187,15 @@ export function LoginForm({ sourceUrl }: { sourceUrl: string }) {
 		signIn("apple", {
 			...(nextPath ? { callbackUrl: nextPath } : {}),
 		});
+	}, [getNextPath]);
+
+	const handleHyatusSignIn = useCallback(() => {
+		const params = new URLSearchParams();
+		const nextPath = getNextPath();
+		if (nextPath) params.set("returnTo", nextPath);
+		window.location.assign(
+			`/api/auth/hyatus${params.size > 0 ? `?${params.toString()}` : ""}`,
+		);
 	}, [getNextPath]);
 
 	const handleWorkosSignIn = useCallback(
@@ -430,6 +451,7 @@ export function LoginForm({ sourceUrl }: { sourceUrl: string }) {
 											loading={loading}
 											oauthError={oauthError}
 											handleGoogleSignIn={handleGoogleSignIn}
+											handleHyatusSignIn={handleHyatusSignIn}
 										/>
 									</motion.form>
 								)}
@@ -540,6 +562,7 @@ const NormalLogin = ({
 	loading,
 	oauthError,
 	handleGoogleSignIn,
+	handleHyatusSignIn,
 }: {
 	setShowOrgInput: (show: boolean) => void;
 	email: string;
@@ -548,6 +571,7 @@ const NormalLogin = ({
 	loading: boolean;
 	oauthError: boolean;
 	handleGoogleSignIn: () => void;
+	handleHyatusSignIn: () => void;
 }) => {
 	const publicEnv = usePublicEnv();
 	const emailInputId = useId();
@@ -555,6 +579,19 @@ const NormalLogin = ({
 	return (
 		<motion.div>
 			<motion.div layout className="flex flex-col space-y-3">
+				<MotionButton
+					variant="dark"
+					type="button"
+					disabled={loading || emailSent}
+					onClick={handleHyatusSignIn}
+				>
+					Continue with Hyatus
+				</MotionButton>
+				<div className="flex gap-4 items-center">
+					<span className="flex-1 h-px bg-gray-5" />
+					<p className="text-sm text-center text-gray-10">OR</p>
+					<span className="flex-1 h-px bg-gray-5" />
+				</div>
 				<MotionInput
 					id={emailInputId}
 					name="email"

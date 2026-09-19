@@ -1,0 +1,1 @@
+ALTER TABLE `videos` ADD `hyatusOnly` boolean DEFAULT false NOT NULL;

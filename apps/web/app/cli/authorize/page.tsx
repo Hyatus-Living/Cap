@@ -3,6 +3,7 @@ import { getCurrentUser } from "@cap/database/auth/session";
 import { nanoId } from "@cap/database/helpers";
 import { agentApiAuthorizationCodes } from "@cap/database/schema";
 import { Logo } from "@cap/ui";
+import { canMintPersistentCredential } from "@cap/web-backend";
 import { redirect } from "next/navigation";
 import {
 	buildAgentCallbackUrl,
@@ -77,6 +78,21 @@ export default async function CliAuthorizePage(props: {
 			`/login?next=${encodeURIComponent(authorizationPath(searchParams))}`,
 		);
 	}
+	if (!canMintPersistentCredential(user)) {
+		return (
+			<main className="flex min-h-screen items-center justify-center bg-gray-2 px-6">
+				<section className="w-full max-w-md rounded-2xl border border-gray-4 bg-white p-8 shadow-sm">
+					<Logo className="mb-8 h-8 w-auto" />
+					<h1 className="text-xl font-semibold text-gray-12">
+						CLI authorization is unavailable
+					</h1>
+					<p className="mt-3 text-sm leading-6 text-gray-10">
+						Hyatus browser sessions cannot create persistent Cap credentials.
+					</p>
+				</section>
+			</main>
+		);
+	}
 
 	async function approve(formData: FormData) {
 		"use server";
@@ -93,6 +109,9 @@ export default async function CliAuthorizePage(props: {
 		const currentUser = await getCurrentUser();
 		if (!currentUser) {
 			redirect("/login");
+		}
+		if (!canMintPersistentCredential(currentUser)) {
+			throw new Error("Hyatus browser sessions cannot authorize the Cap CLI");
 		}
 		if (
 			await isRateLimited(RATE_LIMIT_IDS.AGENT_AUTHORIZATION, {

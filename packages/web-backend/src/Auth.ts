@@ -2,6 +2,7 @@ import { getServerSession } from "@cap/database/auth/auth-options";
 import { isBlockedAccountEmail } from "@cap/database/auth/domain-utils";
 import * as Db from "@cap/database/schema";
 import {
+	type Agent,
 	CurrentUser,
 	type DatabaseError,
 	HttpAuthMiddleware,
@@ -13,47 +14,55 @@ import { type Cause, Effect, Layer, Option, Schema } from "effect";
 
 import { Database } from "./Database.ts";
 
+type AuthenticatedDatabaseUser = typeof Db.users.$inferSelect & {
+	hyatusVerified?: boolean;
+	hyatusScopes?: ReadonlySet<string>;
+};
+
 export const getCurrentUser = Effect.gen(function* () {
 	const db = yield* Database;
+	const session = yield* Effect.tryPromise(() => getServerSession());
+	if (!session?.user) return Option.none();
 
-	return yield* Option.fromNullable(
-		yield* Effect.tryPromise(() => getServerSession()),
-	).pipe(
-		Option.map((session) =>
-			Effect.gen(function* () {
-				const [currentUser] = yield* db.use((db) =>
-					db
-						.select()
-						.from(Db.users)
-						.where(
-							Dz.eq(
-								Db.users.id,
-								UserId.make((session.user as { id: string }).id),
-							),
-						),
-				);
+	const sessionUser = session.user as typeof session.user & {
+		id: string;
+		hyatusScopes?: string[];
+		hyatusVerified?: boolean;
+	};
+	const [currentUser] = yield* db.use((db) =>
+		db
+			.select()
+			.from(Db.users)
+			.where(Dz.eq(Db.users.id, UserId.make(sessionUser.id))),
+	);
 
-				return Option.fromNullable(currentUser);
-			}),
-		),
-		Effect.transposeOption,
-		Effect.map(Option.flatten),
+	return Option.fromNullable(
+		currentUser
+			? {
+					...currentUser,
+					hyatusVerified: sessionUser.hyatusVerified === true,
+					hyatusScopes: new Set<string>(sessionUser.hyatusScopes ?? []),
+				}
+			: null,
 	);
 }).pipe(Effect.withSpan("getCurrentUser"));
 
-export const makeCurrentUser = (
-	user: Option.Option.Value<Effect.Effect.Success<typeof getCurrentUser>>,
-) =>
+export const makeCurrentUser = (user: AuthenticatedDatabaseUser) =>
 	CurrentUser.of({
 		id: user.id,
 		email: user.email,
 		activeOrganizationId: user.activeOrganizationId,
 		iconUrlOrKey: Option.fromNullable(user.image),
+		hyatusVerified: user.hyatusVerified === true,
+		hyatusScopes: new Set(
+			[...(user.hyatusScopes ?? [])].filter(
+				(scope): scope is Agent.AgentScope => typeof scope === "string",
+			),
+		),
 	});
 
-export const makeCurrentUserLayer = (
-	user: Option.Option.Value<Effect.Effect.Success<typeof getCurrentUser>>,
-) => Layer.succeed(CurrentUser, makeCurrentUser(user));
+export const makeCurrentUserLayer = (user: AuthenticatedDatabaseUser) =>
+	Layer.succeed(CurrentUser, makeCurrentUser(user));
 
 export const HttpAuthMiddlewareLive = Layer.effect(
 	HttpAuthMiddleware,
@@ -67,7 +76,7 @@ export const HttpAuthMiddlewareLive = Layer.effect(
 				);
 				const authHeader = headers.authorization?.split(" ")[1];
 
-				let user: Option.Option<typeof Db.users.$inferSelect>;
+				let user: Option.Option<AuthenticatedDatabaseUser>;
 
 				if (authHeader?.length === 36) {
 					user = yield* database

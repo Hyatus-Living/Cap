@@ -31,9 +31,9 @@ export async function GET(request: NextRequest) {
 	}
 
 	const videoId = Video.VideoId.make(rawVideoId);
-	let previewUrl: string | null;
+	let preview: { url: string; hyatusOnly: boolean } | null;
 	try {
-		previewUrl = await Effect.gen(function* () {
+		preview = await Effect.gen(function* () {
 			const videos = yield* Videos;
 			const maybeVideo = yield* videos.getByIdForViewing(videoId);
 			if (Option.isNone(maybeVideo)) return null;
@@ -48,21 +48,34 @@ export async function GET(request: NextRequest) {
 
 			if (!hasPreview) return null;
 
-			return yield* bucket.getSignedObjectUrl(previewKey, {
-				expiresIn: PREVIEW_GIF_EXPIRES_SECONDS,
-			});
+			if (video.hyatusOnly) {
+				const url = new URL("/api/storage/object", request.url);
+				url.searchParams.set("videoId", video.id);
+				url.searchParams.set("key", previewKey);
+				return { url: url.toString(), hyatusOnly: true };
+			}
+			return {
+				url: yield* bucket.getSignedObjectUrl(previewKey, {
+					expiresIn: PREVIEW_GIF_EXPIRES_SECONDS,
+				}),
+				hyatusOnly: false,
+			};
 		}).pipe(provideOptionalAuth, runPromise);
 	} catch (error) {
 		console.warn("[video/preview] Failed to resolve preview GIF:", error);
 		return new NextResponse(null, { status: 404 });
 	}
 
-	if (!previewUrl) {
+	if (!preview) {
 		return getFallbackResponse(request, rawVideoId);
 	}
 
-	const response = NextResponse.redirect(previewUrl, 302);
-	response.headers.set("Cache-Control", "public, max-age=300");
+	const response = NextResponse.redirect(preview.url, 302);
+	response.headers.set(
+		"Cache-Control",
+		preview.hyatusOnly ? "private, no-store" : "public, max-age=300",
+	);
+	if (preview.hyatusOnly) response.headers.set("Vary", "Cookie");
 	return response;
 }
 

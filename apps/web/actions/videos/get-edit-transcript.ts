@@ -5,10 +5,10 @@ import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videoEdits, videos } from "@cap/database/schema";
 import { userIsPro } from "@cap/utils";
-import { Storage } from "@cap/web-backend";
+import { provideOptionalAuth, Storage, Videos } from "@cap/web-backend";
 import type { Video } from "@cap/web-domain";
 import { and, eq, sql } from "drizzle-orm";
-import { Option } from "effect";
+import { Effect, Option } from "effect";
 import { start } from "workflow/api";
 import {
 	type EditTranscript,
@@ -68,7 +68,14 @@ async function loadEditableTranscriptVideo(videoId: Video.VideoId) {
 		.select()
 		.from(videos)
 		.where(eq(videos.id, videoId));
-	if (!video || video.ownerId !== user.id) throw new Error("Video not found");
+	if (!video) throw new Error("Video not found");
+	if (video.hyatusOnly) {
+		await Effect.gen(function* () {
+			const videos = yield* Videos;
+			yield* videos.getByIdForViewing(videoId);
+		}).pipe(provideOptionalAuth, runPromise);
+	}
+	if (video.ownerId !== user.id) throw new Error("Video not found");
 	if (!isEditableTranscriptVideo(video)) {
 		if (video.transcriptionStatus !== "COMPLETE") {
 			throw new Error("Transcript is not ready");

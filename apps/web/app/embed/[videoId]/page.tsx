@@ -77,18 +77,38 @@ export async function generateMetadata(
 	);
 }
 
-const renderEmbedPolicyDenied = () =>
+const renderEmbedPolicyDenied = (videoId: Video.VideoId, reason?: string) =>
 	Effect.succeed(
 		<div className="flex flex-col justify-center items-center min-h-screen text-center text-white bg-black">
-			<h1 className="mb-4 text-2xl font-bold">This video is private</h1>
-			<p className="text-gray-400">
-				If you own this video, please <Link href="/login">sign in</Link> to
-				manage sharing.
-			</p>
+			<h1 className="mb-4 text-2xl font-bold">
+				{reason === "hyatus_login_required"
+					? "Sign in with Hyatus to view"
+					: "This video is private"}
+			</h1>
+			{reason === "hyatus_login_required" ? (
+				<p className="text-gray-400">
+					This recording is available to Hyatus employees.{" "}
+					<Link href={`/api/auth/hyatus?returnTo=/embed/${videoId}`}>
+						Continue with Hyatus
+					</Link>
+					.
+				</p>
+			) : (
+				<p className="text-gray-400">
+					If you own this video, please <Link href="/login">sign in</Link> to
+					manage sharing.
+				</p>
+			)}
 		</div>,
 	);
 
 const renderNoSuchElement = () => Effect.sync(() => notFound());
+
+const getEmbedCatchers = (videoId: Video.VideoId) => ({
+	PolicyDenied: (error: Policy.PolicyDeniedError) =>
+		renderEmbedPolicyDenied(videoId, error.reason),
+	NoSuchElementException: renderNoSuchElement,
+});
 
 export default async function EmbedVideoPage(
 	props: PageProps<"/embed/[videoId]">,
@@ -127,6 +147,7 @@ export default async function EmbedVideoPage(
 					storageIntegrationId: videos.storageIntegrationId,
 					metadata: videos.metadata,
 					public: videos.public,
+					hyatusOnly: videos.hyatusOnly,
 					videoStartTime: videos.videoStartTime,
 					audioStartTime: videos.audioStartTime,
 					awsRegion: videos.awsRegion,
@@ -191,10 +212,7 @@ export default async function EmbedVideoPage(
 				)}
 			</div>
 		)),
-		Effect.catchTags({
-			PolicyDenied: renderEmbedPolicyDenied,
-			NoSuchElementException: renderNoSuchElement,
-		}),
+		Effect.catchTags(getEmbedCatchers(videoId)),
 		provideOptionalAuth,
 		EffectRuntime.runPromise,
 	);

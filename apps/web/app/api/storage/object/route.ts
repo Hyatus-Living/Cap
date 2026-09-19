@@ -153,10 +153,13 @@ export async function GET(request: NextRequest) {
 	const effect = Effect.gen(function* () {
 		const tokenPayload = token ? verifyStorageObjectToken(token) : null;
 		const videoId = Video.VideoId.make(videoIdParam);
-		const video =
+		let video =
 			tokenPayload?.videoId === videoIdParam && tokenPayload.key === key
 				? yield* getTokenVideo(videoId)
 				: yield* getPolicyVideo(videoId);
+		if (video.hyatusOnly && !internalDownload) {
+			video = yield* getPolicyVideo(videoId);
+		}
 
 		if (!key.startsWith(`${video.ownerId}/${video.id}/`)) {
 			return yield* Effect.fail("not-found" as const);
@@ -180,6 +183,11 @@ export async function GET(request: NextRequest) {
 
 		const [storage] = yield* Storage.getAccessForVideo(video);
 		if (!("getObjectResponse" in storage)) {
+			if (video.hyatusOnly) {
+				return new Response("Protected playback is unavailable", {
+					status: 502,
+				});
+			}
 			const url = yield* storage.getSignedObjectUrl(key);
 			return Response.redirect(url);
 		}
@@ -226,6 +234,7 @@ export async function GET(request: NextRequest) {
 		}
 		if (request.method === "HEAD" && head) {
 			const headers = new Headers(CACHE_CONTROL_HEADERS);
+			if (video.hyatusOnly) headers.set("Vary", "Cookie");
 			if (identity) headers.set("ETag", identity);
 			headers.set("Accept-Ranges", "bytes");
 			if (head.ContentLength !== undefined)
@@ -242,6 +251,7 @@ export async function GET(request: NextRequest) {
 					signal: request.signal,
 				});
 		const headers = new Headers(CACHE_CONTROL_HEADERS);
+		if (video.hyatusOnly) headers.set("Vary", "Cookie");
 		if (identity) headers.set("ETag", identity);
 		copyHeader(upstream.headers, headers, "content-type", "Content-Type");
 		copyHeader(upstream.headers, headers, "content-length", "Content-Length");

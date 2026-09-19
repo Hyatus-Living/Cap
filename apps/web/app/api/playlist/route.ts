@@ -170,14 +170,23 @@ const getPlaylistResponse = (
 ) =>
 	Effect.gen(function* () {
 		const [bucket, customBucket] = yield* Storage.getAccessForVideo(video);
+		const getPlaybackObjectUrl = (key: string) =>
+			video.hyatusOnly
+				? Effect.succeed(
+						`${publicOrigin}/api/storage/object?${new URLSearchParams({
+							videoId: video.id,
+							key,
+						}).toString()}`,
+					)
+				: bucket.getSignedObjectUrl(key);
 		const isMp4Source =
 			video.source.type === "desktopMP4" || video.source.type === "webMP4";
 
 		if (urlParams.videoType === "raw-preview") {
 			const rawFileKey = yield* resolveRawPreviewKey(video);
-			return yield* bucket
-				.getSignedObjectUrl(rawFileKey)
-				.pipe(Effect.map(HttpServerResponse.redirect));
+			return yield* getPlaybackObjectUrl(rawFileKey).pipe(
+				Effect.map(HttpServerResponse.redirect),
+			);
 		}
 
 		if (
@@ -307,7 +316,7 @@ const getPlaylistResponse = (
 				return yield* Effect.fail(new HttpApiError.NotFound());
 			}
 
-			const signedInitUrl = yield* bucket.getSignedObjectUrl(initKey);
+			const signedInitUrl = yield* getPlaybackObjectUrl(initKey);
 			const initUrl = resolveMobileWebResourceUrl(
 				signedInitUrl,
 				serverEnv().WEB_URL,
@@ -318,17 +327,15 @@ const getPlaylistResponse = (
 					const key = isVideo
 						? segSource.getVideoSegmentKey(seg.index)
 						: segSource.getAudioSegmentKey(seg.index);
-					return bucket
-						.getSignedObjectUrl(key)
-						.pipe(
-							Effect.map((url) =>
-								resolveMobileWebResourceUrl(
-									url,
-									serverEnv().WEB_URL,
-									publicOrigin,
-								),
+					return getPlaybackObjectUrl(key).pipe(
+						Effect.map((url) =>
+							resolveMobileWebResourceUrl(
+								url,
+								serverEnv().WEB_URL,
+								publicOrigin,
 							),
-						);
+						),
+					);
 				}),
 				{ concurrency: "unbounded" },
 			);
@@ -361,7 +368,11 @@ const getPlaylistResponse = (
 			});
 		}
 
-		if (bucket.provider === "s3" && Option.isNone(customBucket)) {
+		if (
+			bucket.provider === "s3" &&
+			Option.isNone(customBucket) &&
+			(!video.hyatusOnly || isMp4Source)
+		) {
 			let redirect = `${video.ownerId}/${video.id}/combined-source/stream.m3u8`;
 
 			if (isMp4Source || urlParams.videoType === "mp4")
@@ -369,9 +380,7 @@ const getPlaylistResponse = (
 			else if (video.source.type === "MediaConvert")
 				redirect = `${video.ownerId}/${video.id}/output/video_recording_000.m3u8`;
 
-			return HttpServerResponse.redirect(
-				yield* bucket.getSignedObjectUrl(redirect),
-			);
+			return HttpServerResponse.redirect(yield* getPlaybackObjectUrl(redirect));
 		}
 
 		if (
@@ -402,7 +411,7 @@ const getPlaylistResponse = (
 			urlParams.fileType.value === "enhanced-audio"
 		) {
 			const enhancedAudioKey = `${video.ownerId}/${video.id}/enhanced-audio.mp3`;
-			return yield* bucket.getSignedObjectUrl(enhancedAudioKey).pipe(
+			return yield* getPlaybackObjectUrl(enhancedAudioKey).pipe(
 				Effect.map(HttpServerResponse.redirect),
 				Effect.catchTag("StorageError", () =>
 					Effect.fail(new HttpApiError.NotFound()),
@@ -427,7 +436,7 @@ const getPlaylistResponse = (
 
 				for (const [index, line] of lines.entries()) {
 					if (line.endsWith(".ts")) {
-						const url = yield* bucket.getSignedObjectUrl(
+						const url = yield* getPlaybackObjectUrl(
 							`${video.ownerId}/${video.id}/combined-source/${line}`,
 						);
 						lines[index] = url;
@@ -442,13 +451,36 @@ const getPlaylistResponse = (
 						"Content-Type": "application/vnd.apple.mpegurl",
 					},
 				});
+			} else if (video.source.type === "MediaConvert" && video.hyatusOnly) {
+				const outputPrefix = `${video.ownerId}/${video.id}/output/`;
+				const playlistText = (yield* bucket.getObject(
+					`${outputPrefix}video_recording_000.m3u8`,
+				)).pipe(Option.getOrNull);
+				if (!playlistText) {
+					return yield* Effect.fail(new HttpApiError.NotFound());
+				}
+				const lines = playlistText.split("\n");
+				for (const [index, line] of lines.entries()) {
+					if (line && !line.startsWith("#")) {
+						lines[index] = yield* getPlaybackObjectUrl(
+							`${outputPrefix}${line}`,
+						);
+					}
+				}
+				return HttpServerResponse.text(lines.join("\n"), {
+					headers: {
+						...CACHE_CONTROL_HEADERS,
+						"Content-Type": "application/vnd.apple.mpegurl",
+						Vary: "Cookie",
+					},
+				});
 			} else if (isMp4Source) {
 				yield* Effect.log(
 					`Returning path ${`${video.ownerId}/${video.id}/result.mp4`}`,
 				);
-				return yield* bucket
-					.getSignedObjectUrl(`${video.ownerId}/${video.id}/result.mp4`)
-					.pipe(Effect.map(HttpServerResponse.redirect));
+				return yield* getPlaybackObjectUrl(
+					`${video.ownerId}/${video.id}/result.mp4`,
+				).pipe(Effect.map(HttpServerResponse.redirect));
 			}
 
 			if (urlParams.videoType === "master") {
@@ -506,7 +538,7 @@ const getPlaylistResponse = (
 			const chunksUrls = yield* Effect.all(
 				(objects.Contents || []).map((object) =>
 					Effect.gen(function* () {
-						const url = yield* bucket.getSignedObjectUrl(object.Key ?? "");
+						const url = yield* getPlaybackObjectUrl(object.Key ?? "");
 						const metadata = yield* bucket.headObject(object.Key ?? "");
 
 						return {

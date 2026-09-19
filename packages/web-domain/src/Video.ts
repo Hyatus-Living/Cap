@@ -30,6 +30,7 @@ export class Video extends Schema.Class<Video>("Video")({
 	orgId: OrganisationId,
 	name: Schema.String,
 	public: Schema.Boolean,
+	hyatusOnly: Schema.optional(Schema.Boolean),
 	source: Schema.Struct({
 		outputKey: Schema.optional(Schema.String),
 		audioLevelOutputKey: Schema.optional(Schema.String),

@@ -14,7 +14,7 @@ import { faCopy, faShareNodes } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMutation } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Check, Globe2, Lock, Search } from "lucide-react";
+import { Building2, Check, Globe2, Lock, Search } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -47,6 +47,7 @@ interface SharingDialogProps {
 	}[];
 	onSharingUpdated: (updatedSharedSpaces: string[]) => void;
 	isPublic?: boolean;
+	hyatusOnly?: boolean;
 	spacesData?: Spaces[] | null;
 	hasPassword?: boolean;
 	inheritedPasswordSources?: SpaceRuleSource[];
@@ -63,6 +64,7 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 	sharedSpaces,
 	onSharingUpdated,
 	isPublic = false,
+	hyatusOnly = false,
 	spacesData: propSpacesData = null,
 	hasPassword = false,
 	inheritedPasswordSources = [],
@@ -86,8 +88,16 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 	const [initialSelectedSpaces, setInitialSelectedSpaces] = useState<
 		Set<string>
 	>(new Set());
-	const [publicToggle, setPublicToggle] = useState(isPublic);
-	const [initialPublicState, setInitialPublicState] = useState(isPublic);
+	const initialSharing = hyatusOnly
+		? "hyatus"
+		: isPublic
+			? "public"
+			: "private";
+	const [sharing, setSharing] = useState<"private" | "public" | "hyatus">(
+		initialSharing,
+	);
+	const [initialSharingState, setInitialSharingState] =
+		useState(initialSharing);
 	const [passwordEnabled, setPasswordEnabled] = useState(hasPassword);
 	const [passwordValue, setPasswordValue] = useState("");
 	const [initialPasswordEnabled, setInitialPasswordEnabled] =
@@ -99,13 +109,13 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 		mutationFn: async ({
 			capId,
 			spaceIds,
-			public: isPublic,
+			sharing,
 		}: {
 			capId: Video.VideoId;
 			spaceIds: Space.SpaceIdOrOrganisationId[];
-			public: boolean;
+			sharing: "private" | "public" | "hyatus";
 		}) => {
-			const result = await shareCap({ capId, spaceIds, public: isPublic });
+			const result = await shareCap({ capId, spaceIds, sharing });
 
 			if (!result.success) {
 				throw new Error(result.error || "Failed to update sharing settings");
@@ -134,7 +144,7 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 				(id) => !newSelectedSpaces.includes(id),
 			);
 
-			const publicChanged = publicToggle !== initialPublicState;
+			const publicChanged = sharing !== initialSharingState;
 			const passwordChanged =
 				passwordEnabled !== initialPasswordEnabled ||
 				(passwordEnabled && passwordValue.trim().length > 0);
@@ -150,7 +160,11 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 				!passwordChanged
 			) {
 				toast.success(
-					publicToggle ? "Video is now public" : "Video is now private",
+					sharing === "public"
+						? "Anyone with the link can now view"
+						: sharing === "hyatus"
+							? "Hyatus employees can now view"
+							: "Video is now private",
 				);
 			} else if (
 				passwordChanged &&
@@ -234,15 +248,20 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 			const spaceIds = new Set(sharedSpaces.map((space) => space.id));
 			setSelectedSpaces(spaceIds);
 			setInitialSelectedSpaces(spaceIds);
-			setPublicToggle(isPublic);
-			setInitialPublicState(isPublic);
+			const nextSharing = hyatusOnly
+				? "hyatus"
+				: isPublic
+					? "public"
+					: "private";
+			setSharing(nextSharing);
+			setInitialSharingState(nextSharing);
 			setPasswordEnabled(hasPassword);
 			setPasswordValue("");
 			setInitialPasswordEnabled(hasPassword);
 			setSearchTerm("");
 			setActiveTab(tabs[0]);
 		}
-	}, [isOpen, sharedSpaces, isPublic, hasPassword, tabs[0]]);
+	}, [isOpen, sharedSpaces, isPublic, hyatusOnly, hasPassword, tabs[0]]);
 
 	const isSpaceSharedViaOrganization = useCallback(
 		(spaceId: string) => {
@@ -361,32 +380,36 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 				<div className="p-5">
 					{activeTab === "Share" ? (
 						<>
-							{/* Public sharing toggle */}
-							<div className="flex justify-between items-center p-3 mb-4 rounded-lg border bg-gray-1 border-gray-4">
-								<div className="flex gap-3 items-center">
-									<div className="flex justify-center items-center w-8 h-8 rounded-full bg-gray-3">
-										<Globe2 className="w-4 h-4 text-gray-11" />
-									</div>
-									<div>
-										<p className="text-sm font-medium text-gray-12">
-											{allowedEmailDomain?.trim()
-												? "Restricted link access"
-												: "Anyone with the link"}
-										</p>
-										<p className="text-xs text-gray-10">
-											{!publicToggle
-												? "Only people with access can view"
-												: allowedEmailDomain?.trim()
-													? `Only users with matching ${allowedEmailDomain.trim().includes(",") ? "emails" : "email"} can view`
-													: "Anyone on the internet with the link can view"}
-										</p>
-									</div>
-								</div>
-								<Switch
-									checked={publicToggle}
-									onCheckedChange={setPublicToggle}
-								/>
+							<div className="grid grid-cols-3 gap-2 mb-4">
+								{(
+									[
+										["private", "Only you", Lock],
+										["hyatus", "Hyatus", Building2],
+										["public", "Anyone", Globe2],
+									] as const
+								).map(([value, label, Icon]) => (
+									<button
+										type="button"
+										key={value}
+										onClick={() => setSharing(value)}
+										className={clsx(
+											"flex flex-col gap-2 items-center p-3 rounded-lg border text-xs font-medium",
+											sharing === value
+												? "border-blue-8 bg-blue-2 text-blue-11"
+												: "border-gray-4 bg-gray-1 text-gray-11 hover:bg-gray-3",
+										)}
+									>
+										<Icon className="size-4" />
+										{label}
+									</button>
+								))}
 							</div>
+							{sharing === "public" && allowedEmailDomain?.trim() && (
+								<p className="mb-4 text-xs text-gray-10">
+									This organization also restricts public links to matching
+									email addresses.
+								</p>
+							)}
 
 							{inheritedPasswordLabel && (
 								<div className="flex justify-between items-center p-3 mb-4 rounded-lg border bg-gray-1 border-gray-4">
@@ -544,7 +567,7 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 										spaceIds: Array.from(selectedSpaces).map((v) =>
 											Space.SpaceId.make(v),
 										),
-										public: publicToggle,
+										sharing,
 									});
 								}}
 							>

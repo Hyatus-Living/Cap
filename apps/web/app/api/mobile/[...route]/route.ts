@@ -9,12 +9,15 @@ import * as Db from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
 import { userIsPro } from "@cap/utils";
 import {
+	canMintPersistentCredential,
+	createStorageObjectToken,
 	Database,
 	findScreenshotObjectKey,
 	getCurrentUser,
 	ImageUploads,
 	Storage,
 	Videos,
+	VideosPolicy,
 	VideosRepo,
 } from "@cap/web-backend";
 import { getPublishedRecordingThumbnailKey } from "@cap/web-backend/src/Storage/recording-output";
@@ -100,6 +103,19 @@ type CapRow = {
 		| "SKIPPED"
 		| "NO_AUDIO"
 		| null;
+};
+
+const hasFreshHyatusRead = (user: CurrentUser["Type"]) =>
+	user.hyatusVerified === true && user.hyatusScopes?.has("caps:read") === true;
+
+const protectedStorageObjectUrl = (
+	publicOrigin: string,
+	videoId: Video.VideoId,
+	key: string,
+) => {
+	const token = createStorageObjectToken({ videoId, key });
+	const params = new URLSearchParams({ videoId, key, token });
+	return `${publicOrigin}/api/storage/object?${params.toString()}`;
 };
 
 type MobileCapSummary = (typeof Mobile.MobileCapSummary)["Type"];
@@ -382,6 +398,7 @@ const withMappedErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const getMobileThumbnailUrl = Effect.fn("Mobile.getThumbnailUrl")(function* (
 	videoId: Video.VideoId,
+	publicOrigin: string,
 ) {
 	const repo = yield* VideosRepo;
 	const storage = yield* Storage;
@@ -392,14 +409,24 @@ const getMobileThumbnailUrl = Effect.fn("Mobile.getThumbnailUrl")(function* (
 	const [bucket] = yield* storage.getAccessForVideo(video);
 	const publishedThumbnail = getPublishedRecordingThumbnailKey(video);
 	if (publishedThumbnail) {
-		return yield* bucket.getSignedObjectUrl(publishedThumbnail);
+		return {
+			url: video.hyatusOnly
+				? protectedStorageObjectUrl(publicOrigin, video.id, publishedThumbnail)
+				: yield* bucket.getSignedObjectUrl(publishedThumbnail),
+			hyatusOnly: video.hyatusOnly === true,
+		};
 	}
 	const response = yield* bucket.listObjects({
 		prefix: `${video.ownerId}/${video.id}/`,
 	});
 	const thumbnailKey = findScreenshotObjectKey(response.Contents ?? []);
 	if (!thumbnailKey) return null;
-	return yield* bucket.getSignedObjectUrl(thumbnailKey);
+	return {
+		url: video.hyatusOnly
+			? protectedStorageObjectUrl(publicOrigin, video.id, thumbnailKey)
+			: yield* bucket.getSignedObjectUrl(thumbnailKey),
+		hyatusOnly: video.hyatusOnly === true,
+	};
 });
 
 const ensureEmailSignInAllowed = Effect.fn("Mobile.ensureEmailSignInAllowed")(
@@ -438,36 +465,40 @@ const ensureAccountDeletionNotPending = Effect.fn(
 	}
 });
 
-const createMobileApiKey = Effect.fn("Mobile.createMobileApiKey")(function* (
-	userId: User.UserId,
-) {
-	yield* ensureAccountDeletionNotPending({ userId });
-	const database = yield* Database;
-	const apiKey = crypto.randomUUID();
-	yield* database.use((db) =>
-		db.transaction(async (tx) => {
-			await tx
-				.delete(Db.authApiKeys)
-				.where(
-					and(
-						eq(Db.authApiKeys.userId, userId),
-						eq(Db.authApiKeys.source, "mobile"),
-					),
-				);
-			await tx.insert(Db.authApiKeys).values({
-				id: apiKey,
-				userId,
-				source: "mobile",
-			});
-		}),
-	);
+export const createMobileApiKey = Effect.fn("Mobile.createMobileApiKey")(
+	function* (user: Pick<CurrentUser["Type"], "id" | "hyatusVerified">) {
+		if (!canMintPersistentCredential(user)) {
+			return yield* Effect.fail(new HttpApiError.Forbidden());
+		}
+		const userId = user.id;
+		yield* ensureAccountDeletionNotPending({ userId });
+		const database = yield* Database;
+		const apiKey = crypto.randomUUID();
+		yield* database.use((db) =>
+			db.transaction(async (tx) => {
+				await tx
+					.delete(Db.authApiKeys)
+					.where(
+						and(
+							eq(Db.authApiKeys.userId, userId),
+							eq(Db.authApiKeys.source, "mobile"),
+						),
+					);
+				await tx.insert(Db.authApiKeys).values({
+					id: apiKey,
+					userId,
+					source: "mobile",
+				});
+			}),
+		);
 
-	return {
-		type: "api_key" as const,
-		apiKey,
-		userId,
-	};
-});
+		return {
+			type: "api_key" as const,
+			apiKey,
+			userId,
+		};
+	},
+);
 
 const requestEmailSession = Effect.fn("Mobile.requestEmailSession")(function* (
 	rawEmail: string,
@@ -575,7 +606,7 @@ const verifyEmailSession = Effect.fn("Mobile.verifyEmailSession")(function* ({
 		catch: () => new HttpApiError.InternalServerError(),
 	});
 
-	return yield* createMobileApiKey(User.UserId.make(user.id));
+	return yield* createMobileApiKey({ id: User.UserId.make(user.id) });
 });
 
 const requestAccountDeletion = Effect.fn("Mobile.requestAccountDeletion")(
@@ -1376,6 +1407,9 @@ const getCapLocations = Effect.fn("Mobile.getCapLocations")(function* ({
 	const user = yield* CurrentUser;
 	const database = yield* Database;
 	const offset = (page - 1) * limit;
+	const hyatusVisibility = hasFreshHyatusRead(user)
+		? undefined
+		: eq(Db.videos.hyatusOnly, false);
 
 	if (!space) {
 		const folderFilter = folderId
@@ -1385,6 +1419,7 @@ const getCapLocations = Effect.fn("Mobile.getCapLocations")(function* ({
 			eq(Db.videos.ownerId, user.id),
 			eq(Db.videos.orgId, user.activeOrganizationId),
 			isNull(Db.organizations.tombstoneAt),
+			hyatusVisibility,
 		);
 		const whereClause = and(collectionWhereClause, folderFilter);
 		const [locations, [countRow]] = yield* Effect.all([
@@ -1426,6 +1461,7 @@ const getCapLocations = Effect.fn("Mobile.getCapLocations")(function* ({
 		const collectionWhereClause = and(
 			eq(Db.sharedVideos.organizationId, user.activeOrganizationId),
 			isNull(Db.organizations.tombstoneAt),
+			hyatusVisibility,
 		);
 		const whereClause = and(collectionWhereClause, folderFilter);
 		const [locations, [countRow]] = yield* Effect.all([
@@ -1474,6 +1510,7 @@ const getCapLocations = Effect.fn("Mobile.getCapLocations")(function* ({
 	const collectionWhereClause = and(
 		eq(Db.spaceVideos.spaceId, space.id),
 		isNull(Db.organizations.tombstoneAt),
+		hyatusVisibility,
 	);
 	const whereClause = and(collectionWhereClause, folderFilter);
 	const [locations, [countRow]] = yield* Effect.all([
@@ -1685,6 +1722,9 @@ const getCapStatuses = Effect.fn("Mobile.getCapStatuses")(function* (
 
 	const user = yield* CurrentUser;
 	const database = yield* Database;
+	const hyatusVisibility = hasFreshHyatusRead(user)
+		? undefined
+		: eq(Db.videos.hyatusOnly, false);
 	const rows = yield* database.use((db) =>
 		db
 			.select({
@@ -1699,7 +1739,13 @@ const getCapStatuses = Effect.fn("Mobile.getCapStatuses")(function* (
 			})
 			.from(Db.videos)
 			.leftJoin(Db.videoUploads, eq(Db.videos.id, Db.videoUploads.videoId))
-			.where(and(eq(Db.videos.ownerId, user.id), inArray(Db.videos.id, ids))),
+			.where(
+				and(
+					eq(Db.videos.ownerId, user.id),
+					inArray(Db.videos.id, ids),
+					hyatusVisibility,
+				),
+			),
 	);
 
 	return {
@@ -1767,6 +1813,8 @@ const createMobileFolder = Effect.fn("Mobile.createFolder")(function* (
 const assertMobileVideoAccess = Effect.fn("Mobile.assertVideoAccess")(
 	function* (videoId: Video.VideoId) {
 		const user = yield* CurrentUser;
+		const videosPolicy = yield* VideosPolicy;
+		yield* videosPolicy.canView(videoId);
 		const blockedUserIds = yield* getCurrentBlockedUserIds();
 		yield* assertOrganizationAccess(user.activeOrganizationId);
 		const database = yield* Database;
@@ -1818,6 +1866,7 @@ const assertMobileVideoAccess = Effect.fn("Mobile.assertVideoAccess")(
 			return db
 				.select({
 					ownerId: Db.videos.ownerId,
+					hyatusOnly: Db.videos.hyatusOnly,
 					ownerPreferences: Db.users.preferences,
 					hasPassword: sql<boolean>`${Db.videos.password} IS NOT NULL`.mapWith(
 						Boolean,
@@ -1843,6 +1892,7 @@ const assertMobileVideoAccess = Effect.fn("Mobile.assertVideoAccess")(
 		) {
 			return yield* Effect.fail(new HttpApiError.NotFound());
 		}
+		if (row.hyatusOnly) return row;
 		if (row.ownerId === user.id) return row;
 		if (!row.sharedWithOrganization && !row.sharedWithAccessibleSpace) {
 			return yield* Effect.fail(new HttpApiError.NotFound());
@@ -2165,7 +2215,13 @@ const getPlayback = Effect.fn("Mobile.getPlayback")(function* (
 
 	const transcriptKey = `${video.ownerId}/${video.id}/transcription.vtt`;
 	const transcriptUrl = yield* bucket.headObject(transcriptKey).pipe(
-		Effect.flatMap(() => bucket.getSignedObjectUrl(transcriptKey)),
+		Effect.flatMap(() =>
+			video.hyatusOnly
+				? Effect.succeed(
+						protectedStorageObjectUrl(publicOrigin, video.id, transcriptKey),
+					)
+				: bucket.getSignedObjectUrl(transcriptKey),
+		),
 		Effect.map((url) =>
 			resolveMobileWebResourceUrl(url, serverEnv().WEB_URL, publicOrigin),
 		),
@@ -2173,7 +2229,9 @@ const getPlayback = Effect.fn("Mobile.getPlayback")(function* (
 	);
 
 	if (source instanceof Video.Mp4Source) {
-		const signedUrl = yield* bucket.getSignedObjectUrl(source.getFileKey());
+		const signedUrl = video.hyatusOnly
+			? protectedStorageObjectUrl(publicOrigin, video.id, source.getFileKey())
+			: yield* bucket.getSignedObjectUrl(source.getFileKey());
 		const url = resolveMobileWebResourceUrl(
 			signedUrl,
 			serverEnv().WEB_URL,
@@ -2183,6 +2241,13 @@ const getPlayback = Effect.fn("Mobile.getPlayback")(function* (
 	}
 
 	if (source instanceof Video.M3U8Source) {
+		if (video.hyatusOnly) {
+			return {
+				kind: "hls" as const,
+				url: `${publicOrigin}/api/playlist?videoId=${video.id}&videoType=master`,
+				transcriptUrl,
+			};
+		}
 		const signedUrl = yield* bucket.getSignedObjectUrl(
 			source.getPlaylistFileKey(),
 		);
@@ -2793,8 +2858,7 @@ const ApiLive = HttpApiBuilder.api(Mobile.MobileApiContract).pipe(
 										loginRedirectUrl.toString(),
 									);
 								}
-
-								const session = yield* createMobileApiKey(user.value.id);
+								const session = yield* createMobileApiKey(user.value);
 
 								if (urlParams.redirectUri) {
 									const redirectUrl = getMobileRedirectUrl(
@@ -2888,17 +2952,23 @@ const ApiLive = HttpApiBuilder.api(Mobile.MobileApiContract).pipe(
 							),
 						),
 					)
-					.handle("getCapThumbnail", ({ path }) =>
+					.handle("getCapThumbnail", ({ path, request }) =>
 						withMappedErrors(
 							Effect.gen(function* () {
 								yield* assertMobileVideoAccess(path.id);
-								const thumbnailUrl = yield* getMobileThumbnailUrl(path.id);
-								if (!thumbnailUrl) {
+								const thumbnail = yield* getMobileThumbnailUrl(
+									path.id,
+									getMobilePublicOrigin(request),
+								);
+								if (!thumbnail) {
 									return yield* Effect.fail(new HttpApiError.NotFound());
 								}
-								return HttpServerResponse.redirect(thumbnailUrl).pipe(
+								return HttpServerResponse.redirect(thumbnail.url).pipe(
 									HttpServerResponse.setHeaders({
-										"Cache-Control": "private, max-age=300",
+										"Cache-Control": thumbnail.hyatusOnly
+											? "private, no-store"
+											: "private, max-age=300",
+										...(thumbnail.hyatusOnly ? { Vary: "Cookie" } : {}),
 									}),
 								);
 							}),
@@ -2913,7 +2983,7 @@ const ApiLive = HttpApiBuilder.api(Mobile.MobileApiContract).pipe(
 								yield* database.use((db) =>
 									db
 										.update(Db.videos)
-										.set({ public: payload.public })
+										.set({ public: payload.public, hyatusOnly: false })
 										.where(
 											and(
 												eq(Db.videos.id, path.id),

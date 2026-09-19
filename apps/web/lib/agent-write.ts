@@ -527,19 +527,28 @@ export const updateAgentCap = Effect.fn("Agent.updateCap")(function* (input: {
 	principal: Agent.AgentPrincipal["Type"];
 	title: string | undefined;
 	public: boolean | undefined;
+	hyatusOnly: boolean | undefined;
 	idempotencyKey: string;
 	requestId: string;
 }) {
 	const title = input.title?.trim();
 	if (
-		(title === undefined && input.public === undefined) ||
+		(title === undefined &&
+			input.public === undefined &&
+			input.hyatusOnly === undefined) ||
+		(input.public === true && input.hyatusOnly === true) ||
 		(title !== undefined && (title.length === 0 || title.length > 200)) ||
 		!isAgentIdempotencyKey(input.idempotencyKey)
 	) {
 		return yield* badRequest(input.requestId, "The Cap update is invalid");
 	}
 	const requestHash = hash(
-		JSON.stringify({ videoId: input.videoId, title, public: input.public }),
+		JSON.stringify({
+			videoId: input.videoId,
+			title,
+			public: input.public,
+			hyatusOnly: input.hyatusOnly,
+		}),
 	);
 	const database = yield* Database;
 	const result = yield* database.use((db) =>
@@ -572,6 +581,7 @@ export const updateAgentCap = Effect.fn("Agent.updateCap")(function* (input: {
 				.select({
 					name: Db.videos.name,
 					public: Db.videos.public,
+					hyatusOnly: Db.videos.hyatusOnly,
 					metadata: Db.videos.metadata,
 				})
 				.from(Db.videos)
@@ -598,7 +608,14 @@ export const updateAgentCap = Effect.fn("Agent.updateCap")(function* (input: {
 				.update(Db.videos)
 				.set({
 					name: title ?? video.name,
-					public: input.public ?? video.public,
+					public:
+						input.hyatusOnly === true ? false : (input.public ?? video.public),
+					hyatusOnly:
+						input.hyatusOnly === true
+							? true
+							: input.public !== undefined || input.hyatusOnly === false
+								? false
+								: video.hyatusOnly,
 					updatedAt: now,
 					metadata:
 						title === undefined
@@ -609,7 +626,14 @@ export const updateAgentCap = Effect.fn("Agent.updateCap")(function* (input: {
 			const response = {
 				id: input.videoId,
 				title: title ?? video.name,
-				public: input.public ?? video.public,
+				public:
+					input.hyatusOnly === true ? false : (input.public ?? video.public),
+				hyatusOnly:
+					input.hyatusOnly === true
+						? true
+						: input.public !== undefined || input.hyatusOnly === false
+							? false
+							: video.hyatusOnly,
 				updatedAt: now.toISOString(),
 				requestId: input.requestId,
 			};

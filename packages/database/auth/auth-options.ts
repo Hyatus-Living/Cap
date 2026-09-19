@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { serverEnv } from "@cap/env";
 import { User } from "@cap/web-domain";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession as _getServerSession } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
@@ -13,13 +13,17 @@ import type { Provider } from "next-auth/providers/index";
 import WorkOSProvider from "next-auth/providers/workos";
 import { sendEmail } from "../emails/config.ts";
 import { db } from "../index.ts";
-import { users } from "../schema.ts";
+import { hyatusCapIdentities, users } from "../schema.ts";
 import {
 	isBlockedAccountEmail,
 	isEmailAllowedForSignup,
 	isEmailBlockedFromSignup,
 } from "./domain-utils.ts";
 import { DrizzleAdapter } from "./drizzle-adapter.ts";
+import {
+	HYATUS_BROWSER_RESOURCE,
+	requestHyatusBrowserContext,
+} from "./hyatus-browser.ts";
 import {
 	provisionSsoMembership,
 	type SsoAuthContext,
@@ -43,6 +47,31 @@ export async function decodeSessionToken(
 
 	const userId = typeof token.id === "string" ? token.id : null;
 	if (!userId) return token;
+
+	if (typeof token.hyatusBrowserAccessToken === "string") {
+		const context = await requestHyatusBrowserContext({
+			token: token.hyatusBrowserAccessToken,
+			resource: HYATUS_BROWSER_RESOURCE,
+		});
+		if (!context || token.hyatusSubject !== context.subject) return null;
+		const [binding] = await db()
+			.select({
+				userId: hyatusCapIdentities.userId,
+				email: users.email,
+			})
+			.from(hyatusCapIdentities)
+			.innerJoin(users, eq(hyatusCapIdentities.userId, users.id))
+			.where(
+				and(
+					eq(hyatusCapIdentities.hyatusSubject, context.subject),
+					eq(hyatusCapIdentities.userId, User.UserId.make(userId)),
+				),
+			)
+			.limit(1);
+		if (!binding || binding.email.toLowerCase() !== context.email) return null;
+		token.hyatusVerified = true;
+		token.hyatusScopes = [...context.scopes];
+	}
 
 	const [user] = await db()
 		.select({ authSessionVersion: users.authSessionVersion })
@@ -269,10 +298,21 @@ export const authOptions = (ssoContext?: SsoAuthContext): NextAuthOptions => {
 				if (!session.user) return session;
 
 				if (token?.id && typeof token.id === "string") {
-					(session.user as { id: string }).id = token.id;
-					session.user.name = token.name ?? null;
-					session.user.email = token.email ?? null;
-					session.user.image = token.picture ?? null;
+					const sessionUser = session.user as typeof session.user & {
+						id: string;
+						hyatusScopes?: string[];
+						hyatusVerified?: boolean;
+					};
+					sessionUser.id = token.id;
+					sessionUser.name = token.name ?? null;
+					sessionUser.email = token.email ?? null;
+					sessionUser.image = token.picture ?? null;
+					sessionUser.hyatusVerified = token.hyatusVerified === true;
+					sessionUser.hyatusScopes = Array.isArray(token.hyatusScopes)
+						? token.hyatusScopes.filter(
+								(scope): scope is string => typeof scope === "string",
+							)
+						: undefined;
 				}
 
 				return session;

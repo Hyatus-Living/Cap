@@ -13,7 +13,13 @@ export const getSession = async () => {
 };
 
 export const getCurrentUser = cache(
-	async (): Promise<InferSelectModel<typeof users> | null> => {
+	async (): Promise<
+		| (InferSelectModel<typeof users> & {
+				hyatusVerified?: boolean;
+				hyatusScopes?: ReadonlySet<string>;
+		  })
+		| null
+	> => {
 		const session = await getServerSession(authOptions());
 
 		if (!session) return null;
@@ -23,7 +29,13 @@ export const getCurrentUser = cache(
 			.from(users)
 			.where(eq(users.id, User.UserId.make(session.user.id)));
 
-		return currentUser ?? null;
+		return currentUser
+			? {
+					...currentUser,
+					hyatusVerified: session.user.hyatusVerified === true,
+					hyatusScopes: new Set(session.user.hyatusScopes ?? []),
+				}
+			: null;
 	},
 );
 

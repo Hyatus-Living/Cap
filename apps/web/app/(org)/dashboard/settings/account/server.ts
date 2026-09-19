@@ -11,6 +11,7 @@ import {
 	sessions,
 	users,
 } from "@cap/database/schema";
+import { canMintPersistentCredential } from "@cap/web-backend";
 import type { Organisation } from "@cap/web-domain";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -128,6 +129,7 @@ export async function createCliApiKey(input: {
 }): Promise<{ token: string; key: CliApiKeySummary }> {
 	const currentUser = await getCurrentUser();
 	if (!currentUser) throw new Error("Unauthorized");
+	if (!canMintPersistentCredential(currentUser)) throw new Error("Forbidden");
 
 	const name = input.name.trim();
 	if (name.length === 0 || name.length > 100) {

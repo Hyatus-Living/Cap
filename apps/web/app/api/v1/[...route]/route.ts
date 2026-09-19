@@ -147,6 +147,7 @@ type CapRow = {
 	orgId: (typeof Db.organizations.$inferSelect)["id"];
 	name: string;
 	public: boolean;
+	hyatusOnly: boolean;
 	hasPassword: boolean;
 	duration: number | null;
 	folderId: (typeof Db.folders.$inferSelect)["id"] | null;
@@ -426,6 +427,9 @@ const toCurrentUser = (
 	email: principal.email,
 	activeOrganizationId: principal.activeOrganizationId,
 	iconUrlOrKey: Option.none(),
+	hyatusVerified: principal.tokenKind === "delegated",
+	hyatusScopes:
+		principal.tokenKind === "delegated" ? principal.scopes : new Set(),
 });
 
 const hasScope = (
@@ -502,6 +506,7 @@ const getCapRows = Effect.fn("Agent.getCapRows")(function* (
 				orgId: Db.videos.orgId,
 				name: Db.videos.name,
 				public: Db.videos.public,
+				hyatusOnly: Db.videos.hyatusOnly,
 				hasPassword: sql<boolean>`${Db.videos.password} IS NOT NULL`.mapWith(
 					Boolean,
 				),
@@ -620,6 +625,7 @@ const toCapSummary = (
 		access: isOwner ? "owned" : "shared",
 		sharing: {
 			public: row.public,
+			hyatusOnly: row.hyatusOnly,
 			protected: row.hasPassword || rules.hasInheritedPassword,
 		},
 		counts: {
@@ -792,6 +798,9 @@ const listCaps = Effect.fn("Agent.listCaps")(function* (
 				: undefined,
 			updatedAfter ? gt(Db.videos.updatedAt, updatedAfter) : undefined,
 			cursorFilter,
+			principal.tokenKind === "delegated"
+				? undefined
+				: eq(Db.videos.hyatusOnly, false),
 		];
 
 		return db
@@ -802,6 +811,7 @@ const listCaps = Effect.fn("Agent.listCaps")(function* (
 				orgId: Db.videos.orgId,
 				name: Db.videos.name,
 				public: Db.videos.public,
+				hyatusOnly: Db.videos.hyatusOnly,
 				hasPassword: sql<boolean>`${Db.videos.password} IS NOT NULL`.mapWith(
 					Boolean,
 				),
@@ -2748,6 +2758,8 @@ const AgentHandlersLive = HttpApiBuilder.group(
 							(payload.title !== undefined &&
 								!cap.capabilities.editTitle.allowed) ||
 							(payload.public !== undefined &&
+								!cap.capabilities.editVisibility.allowed) ||
+							(payload.hyatusOnly !== undefined &&
 								!cap.capabilities.editVisibility.allowed)
 						) {
 							return yield* forbidden(requestId);
@@ -2757,6 +2769,7 @@ const AgentHandlersLive = HttpApiBuilder.group(
 							principal,
 							title: payload.title,
 							public: payload.public,
+							hyatusOnly: payload.hyatusOnly,
 							idempotencyKey: yield* requestIdempotencyKey,
 							requestId,
 						});

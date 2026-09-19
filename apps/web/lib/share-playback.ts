@@ -1,3 +1,4 @@
+import { HYATUS_BROWSER_RESOURCE } from "@cap/database/auth/hyatus-browser";
 import type { videos } from "@cap/database/schema";
 import { Storage } from "@cap/web-backend";
 import { type User, Video } from "@cap/web-domain";
@@ -11,6 +12,12 @@ type SharePlaybackVideo = Omit<
 
 export const getSharePlaybackUrl = (video: SharePlaybackVideo) =>
 	Effect.gen(function* () {
+		if (video.hyatusOnly) {
+			const url = new URL("/api/playlist", HYATUS_BROWSER_RESOURCE);
+			url.searchParams.set("videoId", video.id);
+			url.searchParams.set("videoType", "mp4");
+			return url.toString();
+		}
 		const loadedVideo = yield* Schema.decodeUnknown(Video.Video)({
 			...video,
 			ownerId: video.owner.id,
