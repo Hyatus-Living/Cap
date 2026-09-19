@@ -1,0 +1,73 @@
+name: "Export Cap Web Image"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "GHCR manifest digest to export"
+        required: true
+        type: string
+      source_revision:
+        description: "Source revision recorded with the export"
+        required: true
+        type: string
+      age_recipient:
+        description: "One-time age recipient for artifact encryption"
+        required: true
+        type: string
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      SOURCE_REVISION: ${{ inputs.source_revision }}
+      AGE_RECIPIENT: ${{ inputs.age_recipient }}
+
+    steps:
+      - name: Validate inputs
+        run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export exact amd64 image
+        run: |
+          image="ghcr.io/hyatus-living/cap-web@$IMAGE_DIGEST"
+          docker pull --platform linux/amd64 "$image"
+          docker tag "$image" "cap-web:$SOURCE_REVISION"
+          docker save "cap-web:$SOURCE_REVISION" -o /tmp/cap-web-amd64.tar
+          {
+            echo "source_manifest=$IMAGE_DIGEST"
+            echo "source_revision=$SOURCE_REVISION"
+            docker image inspect "cap-web:$SOURCE_REVISION" --format 'image_id={{.Id}}'
+            sha256sum /tmp/cap-web-amd64.tar
+          } > /tmp/cap-web-metadata.txt
+
+      - name: Encrypt export
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+          age -r "$AGE_RECIPIENT" -o /tmp/cap-web-amd64.tar.age /tmp/cap-web-amd64.tar
+          sha256sum /tmp/cap-web-amd64.tar.age >> /tmp/cap-web-metadata.txt
+
+      - name: Upload encrypted image
+        uses: actions/upload-artifact@v4
+        with:
+          name: cap-web-amd64-${{ inputs.source_revision }}
+          path: |
+            /tmp/cap-web-amd64.tar.age
+            /tmp/cap-web-metadata.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
