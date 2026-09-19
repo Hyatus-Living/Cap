@@ -1,9 +1,15 @@
 "use server";
 
 import { db } from "@cap/database";
+import { HYATUS_BROWSER_RESOURCE } from "@cap/database/auth/hyatus-browser";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videoEdits, videos, videoUploads } from "@cap/database/schema";
-import { Storage } from "@cap/web-backend";
+import {
+	createStorageObjectToken,
+	provideOptionalAuth,
+	Storage,
+	Videos,
+} from "@cap/web-backend";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -23,6 +29,23 @@ export type VideoDownloadInfo =
 			error: string;
 	  };
 
+const assertHyatusDownloadAccess = async (
+	videoId: Video.VideoId,
+	hyatusOnly: boolean,
+) => {
+	if (!hyatusOnly) return;
+	await Effect.gen(function* () {
+		const videos = yield* Videos;
+		yield* videos.getByIdForViewing(videoId);
+	}).pipe(provideOptionalAuth, runPromise);
+};
+
+const protectedDownloadUrl = (videoId: Video.VideoId, key: string) => {
+	const token = createStorageObjectToken({ videoId, key });
+	const params = new URLSearchParams({ videoId, key, token });
+	return `${HYATUS_BROWSER_RESOURCE}/api/storage/object?${params.toString()}`;
+};
+
 export async function downloadVideo(videoId: Video.VideoId) {
 	const user = await getCurrentUser();
 
@@ -41,6 +64,7 @@ export async function downloadVideo(videoId: Video.VideoId) {
 	if (!video) {
 		throw new Error("Video not found");
 	}
+	await assertHyatusDownloadAccess(videoId, video.hyatusOnly);
 
 	if (video.ownerId !== userId) {
 		throw new Error("You don't have permission to download this video");
@@ -53,7 +77,9 @@ export async function downloadVideo(videoId: Video.VideoId) {
 			const [bucket] = yield* Storage.getAccessForVideo(
 				decodeStorageVideo(video),
 			);
-			return yield* bucket.getSignedObjectUrl(videoKey);
+			return video.hyatusOnly
+				? protectedDownloadUrl(videoId, videoKey)
+				: yield* bucket.getSignedObjectUrl(videoKey);
 		}).pipe(runPromise);
 
 		return {
@@ -85,6 +111,7 @@ export async function getVideoDownloadInfo(
 		.where(eq(videos.id, videoId));
 
 	if (!video) throw new Error("Video not found");
+	await assertHyatusDownloadAccess(videoId, video.hyatusOnly);
 
 	const allowed = await canUserDownloadVideo({
 		userId: user.id,
@@ -150,7 +177,9 @@ export async function getVideoDownloadInfo(
 				Effect.catchAll(() => Effect.succeed(false)),
 			);
 			if (!exists) return null;
-			return yield* bucket.getSignedObjectUrl(downloadKey);
+			return video.hyatusOnly
+				? protectedDownloadUrl(videoId, downloadKey)
+				: yield* bucket.getSignedObjectUrl(downloadKey);
 		}).pipe(runPromise);
 
 		if (!downloadUrl) {

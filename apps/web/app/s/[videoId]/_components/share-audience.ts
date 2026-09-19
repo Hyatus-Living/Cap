@@ -7,7 +7,7 @@
  * out what that means for the link.
  */
 
-export type ShareAudienceKind = "public" | "spaces" | "private";
+export type ShareAudienceKind = "public" | "hyatus" | "spaces" | "private";
 
 export interface ShareAudience {
 	kind: ShareAudienceKind;
@@ -17,6 +17,7 @@ export interface ShareAudience {
 
 export interface ShareAudienceInput {
 	isPublic: boolean;
+	hyatusOnly?: boolean;
 	/** Includes an inherited password from a space or organization. */
 	passwordProtected: boolean;
 	/**
@@ -40,6 +41,7 @@ const listNames = (names: string[], total: number): string => {
 
 export const describeShareAudience = ({
 	isPublic,
+	hyatusOnly = false,
 	passwordProtected,
 	audienceNames,
 }: ShareAudienceInput): ShareAudience => {
@@ -52,6 +54,15 @@ export const describeShareAudience = ({
 			tooltip: passwordProtected
 				? "Anyone who has this link and the password can watch this Cap."
 				: "Anyone who has this link can watch this Cap, including people outside your organization.",
+		};
+	}
+
+	if (hyatusOnly) {
+		return {
+			kind: "hyatus",
+			label: "Anyone at Hyatus",
+			tooltip:
+				"Any employee signed in through Hyatus can watch this Cap. The link will not work for anyone else.",
 		};
 	}
 

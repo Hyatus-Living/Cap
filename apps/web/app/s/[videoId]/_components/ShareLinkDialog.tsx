@@ -88,6 +88,7 @@ export const ShareLinkDialog = ({
 	videoTitle,
 	shareUrl,
 	isPublic,
+	hyatusOnly = false,
 	canManageAccess = false,
 	onManageAccess,
 }: {
@@ -98,6 +99,7 @@ export const ShareLinkDialog = ({
 	/** Custom-domain aware share link, without any query string. */
 	shareUrl: string;
 	isPublic: boolean;
+	hyatusOnly?: boolean;
 	canManageAccess?: boolean;
 	onManageAccess?: () => void;
 }) => {
@@ -206,8 +208,9 @@ export const ShareLinkDialog = ({
 							<Lock className="mt-0.5 size-4 shrink-0 text-amber-600" />
 							<div className="min-w-0 flex-1">
 								<p className="text-sm text-amber-900">
-									This Cap isn't public, so anyone you share it with will be
-									asked to sign in and will need access.
+									{hyatusOnly
+										? "Only employees signed in through Hyatus can open this link."
+										: "This Cap isn't public, so anyone you share it with will be asked to sign in and will need access."}
 								</p>
 								{canManageAccess && onManageAccess && (
 									<button

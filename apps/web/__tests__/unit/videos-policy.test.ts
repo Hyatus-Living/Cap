@@ -20,6 +20,7 @@ const TEST_OTHER_USER_ID = "other-user-1" as User.UserId;
 function makeVideo(
 	overrides: Partial<{
 		public: boolean;
+		hyatusOnly: boolean;
 		ownerId: string;
 		orgId: string;
 	}> = {},
@@ -30,6 +31,7 @@ function makeVideo(
 		orgId: (overrides.orgId ?? TEST_ORG_ID) as Organisation.OrganisationId,
 		name: "Test Video",
 		public: overrides.public ?? true,
+		hyatusOnly: overrides.hyatusOnly ?? false,
 		source: { type: "desktopMP4" },
 		metadata: Option.none(),
 		bucketId: Option.none(),
@@ -123,18 +125,69 @@ function runCanView(
 function makeUser(
 	email: string,
 	id?: string,
+	hyatus?: boolean,
 ): Option.Option<CurrentUser["Type"]> {
 	return Option.some({
 		id: (id ?? TEST_OTHER_USER_ID) as User.UserId,
 		email,
 		activeOrganizationId: TEST_ORG_ID,
 		iconUrlOrKey: Option.none(),
+		hyatusVerified: hyatus,
+		hyatusScopes: hyatus ? new Set(["caps:read" as const]) : new Set(),
 	});
 }
 
 const noUser = Option.none<CurrentUser["Type"]>();
 
 describe("VideosPolicy.canView", () => {
+	describe("Hyatus employee access", () => {
+		it("allows a freshly verified Hyatus employee", async () => {
+			const deps = makeDeps({
+				video: makeVideo({ public: false, hyatusOnly: true }),
+			});
+
+			expect(
+				await runCanView(
+					deps,
+					makeUser("employee@hyatus.com", undefined, true),
+				),
+			).toBe("allowed");
+		});
+
+		it("denies anonymous and ordinary Cap users", async () => {
+			const deps = makeDeps({
+				video: makeVideo({ public: false, hyatusOnly: true }),
+				orgMembership: true,
+				spaceMembership: true,
+			});
+
+			expect(await runCanView(deps, noUser)).toBe("denied");
+			expect(await runCanView(deps, makeUser("member@hyatus.com"))).toBe(
+				"denied",
+			);
+		});
+
+		it("denies the owner without a fresh Hyatus session", async () => {
+			const deps = makeDeps({
+				video: makeVideo({ public: false, hyatusOnly: true }),
+			});
+
+			expect(
+				await runCanView(deps, makeUser("owner@example.com", TEST_OWNER_ID)),
+			).toBe("denied");
+		});
+
+		it("denies a revoked Hyatus principal", async () => {
+			const deps = makeDeps({
+				video: makeVideo({ public: false, hyatusOnly: true }),
+			});
+			const revoked = makeUser("employee@hyatus.com", undefined, true);
+			if (Option.isSome(revoked)) revoked.value.hyatusVerified = false;
+
+			expect(await runCanView(deps, revoked)).toBe("denied");
+		});
+	});
+
 	describe("owner access", () => {
 		it("allows the video owner regardless of restrictions", async () => {
 			const deps = makeDeps({

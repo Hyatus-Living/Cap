@@ -11,6 +11,7 @@ const candidate = (
 	ownerId: "owner123",
 	ownerName: "Richie",
 	public: true,
+	hyatusOnly: false,
 	hasPassword: false,
 	hasInheritedPassword: false,
 	allowedEmailDomain: null,
@@ -32,6 +33,7 @@ describe("public share video eligibility", () => {
 
 	it.each([
 		{ public: false },
+		{ hyatusOnly: true },
 		{ hasPassword: true },
 		{ hasInheritedPassword: true },
 		{ allowedEmailDomain: "@cap.so" },

@@ -16,6 +16,7 @@ export type PublicShareVideoCandidate = {
 	ownerId: string;
 	ownerName: string | null;
 	public: boolean;
+	hyatusOnly: boolean;
 	hasPassword: boolean;
 	hasInheritedPassword: boolean;
 	allowedEmailDomain: string | null;
@@ -37,6 +38,7 @@ export type PublicShareVideoCandidate = {
 export type PublicShareVideo = Omit<
 	PublicShareVideoCandidate,
 	| "public"
+	| "hyatusOnly"
 	| "hasPassword"
 	| "hasInheritedPassword"
 	| "allowedEmailDomain"
@@ -50,6 +52,7 @@ export const isPublicShareVideoCandidateEligible = (
 	video: PublicShareVideoCandidate,
 ) =>
 	video.public &&
+	!video.hyatusOnly &&
 	!video.hasPassword &&
 	!video.hasInheritedPassword &&
 	(video.allowedEmailDomain?.trim().length ?? 0) === 0 &&
@@ -69,6 +72,7 @@ export async function getPublicShareVideo(
 			ownerId: videos.ownerId,
 			ownerName: users.name,
 			public: videos.public,
+			hyatusOnly: videos.hyatusOnly,
 			hasPassword: sql<boolean>`${videos.password} IS NOT NULL`.mapWith(
 				Boolean,
 			),

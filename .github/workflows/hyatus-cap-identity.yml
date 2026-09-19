@@ -2,6 +2,12 @@ name: Hyatus Cap identity
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/hyatus-cap-identity.yml"
+      - "apps/web/**"
+      - "packages/database/**"
+      - "packages/web-backend/**"
+      - "packages/web-domain/**"
   workflow_dispatch:
 
 permissions:
@@ -35,4 +41,4 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run db:push
-      - run: bun run --filter=@cap/web test -- __tests__/unit/hyatus-cap-auth.test.ts __tests__/integration/hyatus-cap-database.test.ts
+      - run: bun run --filter=@cap/web test -- __tests__/unit/hyatus-cap-auth.test.ts __tests__/unit/hyatus-browser-auth.test.ts __tests__/unit/hyatus-browser-route.test.ts __tests__/unit/hyatus-desktop-credential.test.ts __tests__/unit/hyatus-extension-credential.test.ts __tests__/unit/hyatus-mobile-credential.test.ts __tests__/unit/videos-policy.test.ts __tests__/unit/public-share-video.test.ts __tests__/unit/public-collections-policy.test.ts __tests__/unit/share-playback.test.ts __tests__/unit/storage-object-route.test.ts __tests__/unit/recording-storage-lifecycle.test.ts __tests__/unit/mobile-api-contract.test.ts __tests__/unit/get-edit-transcript.test.ts __tests__/unit/edit-transcript.test.ts __tests__/unit/video-download-permissions.test.ts __tests__/unit/download-route.test.ts __tests__/integration/hyatus-cap-database.test.ts

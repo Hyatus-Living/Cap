@@ -93,13 +93,23 @@ export async function GET(request: NextRequest) {
 				},
 			);
 
-		const thumbnailUrl = await bucket
-			.getSignedObjectUrl(thumbnailKey)
-			.pipe(runPromise);
+		const thumbnailUrl = query.hyatusOnly
+			? (() => {
+					const url = new URL("/api/storage/object", request.url);
+					url.searchParams.set("videoId", query.id);
+					url.searchParams.set("key", thumbnailKey);
+					return url.toString();
+				})()
+			: await bucket.getSignedObjectUrl(thumbnailKey).pipe(runPromise);
 
 		return new Response(JSON.stringify({ screen: thumbnailUrl }), {
 			status: 200,
-			headers: getHeaders(origin),
+			headers: {
+				...getHeaders(origin),
+				...(query.hyatusOnly
+					? { "Cache-Control": "private, no-store", Vary: "Cookie" }
+					: {}),
+			},
 		});
 	} catch (error) {
 		return new Response(

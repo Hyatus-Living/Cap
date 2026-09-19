@@ -3,6 +3,7 @@ import { decodeSessionToken } from "@cap/database/auth/auth-options";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { authApiKeys } from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
+import { canMintPersistentCredential } from "@cap/web-backend";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -34,6 +35,12 @@ app.get(
 
 		const user = await getCurrentUser();
 		if (!user) return c.redirect(loginRedirectUrl);
+		if (!canMintPersistentCredential(user)) {
+			return c.json(
+				{ error: "Hyatus browser sessions cannot issue desktop credentials" },
+				403,
+			);
+		}
 
 		let data:
 			| { type: "token"; token: string; expires: string }

@@ -19,7 +19,7 @@ export type LoadedVideo = readonly [Video.Video, Option.Option<string>];
 
 export type ViewableVideo = Pick<
 	Video.Video,
-	"id" | "ownerId" | "orgId" | "public"
+	"id" | "ownerId" | "orgId" | "public" | "hyatusOnly"
 >;
 
 export type VideosPolicyDeps = {
@@ -60,6 +60,21 @@ const decideCanView = (
 	password: Option.Option<string>,
 ) =>
 	Effect.gen(function* () {
+		if (video.hyatusOnly) {
+			if (
+				Option.isSome(user) &&
+				user.value.hyatusVerified &&
+				user.value.hyatusScopes?.has("caps:read")
+			) {
+				return true;
+			}
+			yield* Effect.fail(
+				new Policy.PolicyDeniedError({
+					reason: "hyatus_login_required",
+				}),
+			);
+		}
+
 		if (Option.isSome(user)) {
 			const userId = user.value.id;
 			if (userId === video.ownerId) return true;

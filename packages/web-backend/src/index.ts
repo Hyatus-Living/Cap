@@ -3,6 +3,7 @@ export * from "./AgentManagement.ts";
 export * from "./Auth.ts";
 export * from "./Aws.ts";
 export * from "./Comments/CommentMediaToken.ts";
+export * from "./CredentialPolicy.ts";
 export * from "./Database.ts";
 export * from "./Extension/index.ts";
 export { Folders } from "./Folders/index.ts";

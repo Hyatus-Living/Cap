@@ -1,7 +1,7 @@
 import { HttpApiError, HttpApiMiddleware } from "@effect/platform";
 import { RpcMiddleware } from "@effect/rpc";
 import { Context, type Option, Schema } from "effect";
-
+import type { AgentScope } from "./Agent.ts";
 import { InternalError } from "./Errors.ts";
 import type { ImageUpload, Organisation, User } from "./index.ts";
 
@@ -12,6 +12,8 @@ export class CurrentUser extends Context.Tag("CurrentUser")<
 		email: string;
 		activeOrganizationId: Organisation.OrganisationId;
 		iconUrlOrKey: Option.Option<ImageUpload.ImageUrlOrKey>;
+		hyatusVerified?: boolean;
+		hyatusScopes?: ReadonlySet<AgentScope>;
 	}
 >() {}
 

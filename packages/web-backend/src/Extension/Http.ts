@@ -15,6 +15,7 @@ import {
 import { Effect, Option, Schema } from "effect";
 
 import { getCurrentUser } from "../Auth.ts";
+import { canMintPersistentCredential } from "../CredentialPolicy.ts";
 import { handleDomainError } from "../Http/Errors.ts";
 import { Videos } from "../Videos/index.ts";
 import { Extensions } from "./Extensions.ts";
@@ -283,6 +284,9 @@ export const ExtensionHttpLive = HttpApiBuilder.group(
 									state: payload.state,
 								}),
 							);
+						}
+						if (!canMintPersistentCredential(currentUser.value)) {
+							return yield* new HttpApiError.Forbidden();
 						}
 
 						const authApiKey = yield* extensions.mintAuthKey(

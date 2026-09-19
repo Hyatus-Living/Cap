@@ -18,14 +18,10 @@ import { revalidatePath } from "next/cache";
 interface ShareCapParams {
 	capId: Video.VideoId;
 	spaceIds: Space.SpaceIdOrOrganisationId[];
-	public?: boolean;
+	sharing?: "private" | "public" | "hyatus";
 }
 
-export async function shareCap({
-	capId,
-	spaceIds,
-	public: isPublic,
-}: ShareCapParams) {
+export async function shareCap({ capId, spaceIds, sharing }: ShareCapParams) {
 	try {
 		const user = await getCurrentUser();
 		if (!user) {
@@ -140,11 +136,13 @@ export async function shareCap({
 			}
 		}
 
-		// Update public status if provided
-		if (typeof isPublic === "boolean") {
+		if (sharing) {
 			await db()
 				.update(videos)
-				.set({ public: isPublic })
+				.set({
+					public: sharing === "public",
+					hyatusOnly: sharing === "hyatus",
+				})
 				.where(eq(videos.id, capId));
 		}
 

@@ -820,6 +820,35 @@ describe("recording storage lifecycle", () => {
 			).toEqual([]);
 		},
 	);
+
+	it("keeps a Hyatus-only thumbnail behind the authenticated object route", async () => {
+		vi.stubEnv("DATABASE_URL", "mysql://cap:cap@127.0.0.1:3306/cap");
+		vi.stubEnv("WEB_URL", "https://videos.gptguest.com");
+		vi.stubEnv("NEXTAUTH_URL", "https://videos.gptguest.com");
+		vi.stubEnv("NEXTAUTH_SECRET", "test-secret");
+		vi.stubEnv("CAP_AWS_BUCKET", "cap-test");
+		vi.stubEnv("CAP_AWS_REGION", "us-east-1");
+		const protectedVideo = Video.Video.make({
+			...recording(),
+			hyatusOnly: true,
+		});
+		databaseFixture(protectedVideo);
+		await storageFixture([[thumbnailKey, "current-thumbnail"]]);
+		const thumbnail = await Effect.runPromise(
+			Effect.flatMap(Videos, (videos) => videos.getThumbnailURL(videoId)).pipe(
+				Effect.provide(Videos.Default),
+				Effect.provideService(CurrentUser, {
+					...currentUser,
+					hyatusVerified: true,
+					hyatusScopes: new Set(["caps:read" as const]),
+				}),
+			),
+		);
+		const url = Option.getOrNull(thumbnail);
+		expect(url).toContain("/api/storage/object?");
+		expect(url).toContain(`videoId=${videoId}`);
+		expect(url).not.toContain("X-Amz-Signature");
+	});
 	it.each([
 		"committing",
 		"queued",

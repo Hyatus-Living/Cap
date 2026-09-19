@@ -1,4 +1,5 @@
 import { db } from "@cap/database";
+import { decodeSessionToken } from "@cap/database/auth/auth-options";
 import { organizations } from "@cap/database/schema";
 import { buildEnv, serverEnv } from "@cap/env";
 import { eq } from "drizzle-orm";
@@ -24,6 +25,31 @@ const mainOrigins = [
 export async function proxy(request: NextRequest) {
 	const url = new URL(request.url);
 	const path = url.pathname;
+
+	if (
+		!path.startsWith("/api/auth/") &&
+		request.method !== "GET" &&
+		request.method !== "HEAD" &&
+		request.method !== "OPTIONS"
+	) {
+		const sessionCookie = request.cookies.get("next-auth.session-token")?.value;
+		if (sessionCookie) {
+			const session = await decodeSessionToken({
+				token: sessionCookie,
+				secret: serverEnv().NEXTAUTH_SECRET,
+			});
+			if (
+				session?.hyatusVerified === true &&
+				(!Array.isArray(session.hyatusScopes) ||
+					!session.hyatusScopes.includes("caps:write"))
+			) {
+				return NextResponse.json(
+					{ error: "The caps:write permission is required" },
+					{ status: 403 },
+				);
+			}
+		}
+	}
 
 	if (path === "/" && request.cookies.has("next-auth.session-token")) {
 		return NextResponse.redirect(new URL("/dashboard/caps", url.origin));
@@ -132,6 +158,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
 	matcher: [
-		"/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+		"/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
 	],
 };

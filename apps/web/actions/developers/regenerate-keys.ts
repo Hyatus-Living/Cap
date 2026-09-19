@@ -5,6 +5,7 @@ import { getCurrentUser } from "@cap/database/auth/session";
 import { encrypt } from "@cap/database/crypto";
 import { nanoId, nanoIdLong } from "@cap/database/helpers";
 import { developerApiKeys, developerApps } from "@cap/database/schema";
+import { canMintPersistentCredential } from "@cap/web-backend";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { hashKey } from "@/lib/developer-key-hash";
@@ -12,6 +13,7 @@ import { hashKey } from "@/lib/developer-key-hash";
 export async function regenerateDeveloperKeys(appId: string) {
 	const user = await getCurrentUser();
 	if (!user) throw new Error("Unauthorized");
+	if (!canMintPersistentCredential(user)) throw new Error("Forbidden");
 
 	const [app] = await db()
 		.select()

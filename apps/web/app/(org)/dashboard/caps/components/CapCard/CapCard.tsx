@@ -84,6 +84,7 @@ export interface CapCardProps extends PropsWithChildren {
 		name: string;
 		createdAt: Date;
 		public?: boolean;
+		hyatusOnly?: boolean;
 		totalComments: number;
 		totalReactions: number;
 		sharedOrganizations?: {
@@ -403,6 +404,7 @@ export const CapCard = ({
 				sharedSpaces={cap.sharedSpaces || []}
 				onSharingUpdated={handleSharingUpdated}
 				isPublic={cap.public}
+				hyatusOnly={cap.hyatusOnly}
 				hasPassword={passwordProtected}
 				inheritedPasswordSources={cap.inheritedPasswordSources}
 				onPasswordUpdated={handlePasswordUpdated}

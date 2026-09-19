@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	Folder,
 	Mobile,
@@ -10,6 +12,28 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 describe("mobile API contract schemas", () => {
+	it("keeps the Hyatus credential gate inside mobile API-key issuance", () => {
+		const route = readFileSync(
+			join(process.cwd(), "app/api/mobile/[...route]/route.ts"),
+			"utf8",
+		);
+		const create = route.indexOf("export const createMobileApiKey");
+		const boundary = route.indexOf(
+			"if (!canMintPersistentCredential(user))",
+			create,
+		);
+		const database = route.indexOf("const database = yield* Database", create);
+		const issuance = route.indexOf(
+			"const session = yield* createMobileApiKey(user.value)",
+		);
+		expect(boundary).toBeGreaterThan(-1);
+		expect(database).toBeGreaterThan(boundary);
+		expect(issuance).toBeGreaterThan(database);
+		expect(route.slice(boundary, database)).toContain(
+			"Effect.fail(new HttpApiError.Forbidden())",
+		);
+	});
+
 	it("enforces the five-minute free recording limit with segment tolerance", () => {
 		expect(
 			Mobile.isMobileRecordingDurationAllowed({

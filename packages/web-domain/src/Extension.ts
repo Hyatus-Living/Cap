@@ -79,6 +79,7 @@ export class ExtensionHttpApi extends HttpApiGroup.make("extension")
 				),
 			)
 			.addError(HttpApiError.BadRequest)
+			.addError(HttpApiError.Forbidden)
 			.addError(InternalServerError),
 	)
 	.add(

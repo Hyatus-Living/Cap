@@ -184,7 +184,13 @@ async function getSharedSpacesForVideo(videoId: Video.VideoId) {
 	};
 }
 
-function PolicyDeniedView({ reason }: { reason?: string }) {
+function PolicyDeniedView({
+	reason,
+	videoId,
+}: {
+	reason?: string;
+	videoId: Video.VideoId;
+}) {
 	let title = "This video is private";
 	let description: React.ReactNode = (
 		<>
@@ -200,6 +206,17 @@ function PolicyDeniedView({ reason }: { reason?: string }) {
 				The owner of this video has restricted access. Please{" "}
 				<Link href="/login">sign in</Link> with an authorized email address to
 				view.
+			</>
+		);
+	} else if (reason === "hyatus_login_required") {
+		title = "Sign in with Hyatus to view";
+		description = (
+			<>
+				This recording is available to Hyatus employees.{" "}
+				<Link href={`/api/auth/hyatus?returnTo=/s/${videoId}`}>
+					Continue with Hyatus
+				</Link>
+				.
 			</>
 		);
 	} else if (reason === "email_restriction_denied") {
@@ -218,7 +235,9 @@ function PolicyDeniedView({ reason }: { reason?: string }) {
 }
 
 const renderPolicyDenied = (videoId: Video.VideoId, reason?: string) =>
-	Effect.succeed(<PolicyDeniedView key={videoId} reason={reason} />);
+	Effect.succeed(
+		<PolicyDeniedView key={videoId} reason={reason} videoId={videoId} />,
+	);
 
 const renderNoSuchElement = (awaitRecording: boolean) =>
 	awaitRecording
@@ -344,6 +363,7 @@ export default async function ShareVideoPage(props: PageProps<"/s/[videoId]">) {
 					storageIntegrationId: videos.storageIntegrationId,
 					metadata: videos.metadata,
 					public: videos.public,
+					hyatusOnly: videos.hyatusOnly,
 					videoStartTime: videos.videoStartTime,
 					audioStartTime: videos.audioStartTime,
 					awsRegion: videos.awsRegion,

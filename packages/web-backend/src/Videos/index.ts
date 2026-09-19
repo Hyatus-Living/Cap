@@ -1,3 +1,4 @@
+import { HYATUS_BROWSER_RESOURCE } from "@cap/database/auth/hyatus-browser";
 import { nanoId } from "@cap/database/helpers";
 import * as Db from "@cap/database/schema";
 import { buildEnv, NODE_ENV, serverEnv } from "@cap/env";
@@ -20,6 +21,7 @@ import {
 	getPublishedRecordingThumbnailKey,
 	isInternalRecordingKey,
 } from "../Storage/recording-output.ts";
+import { createStorageObjectToken } from "../Storage/SignedObject.ts";
 import { Tinybird } from "../Tinybird/index.ts";
 import { VideosPolicy } from "./VideosPolicy.ts";
 import type { CreateVideoInput as RepoCreateVideoInput } from "./VideosRepo.ts";
@@ -613,6 +615,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 						orgId: input.orgId,
 						name: `Cap Recording - ${formattedDate}`,
 						public: serverEnv().CAP_VIDEOS_DEFAULT_PUBLIC,
+						hyatusOnly: false,
 						source: { type: "webMP4" },
 						bucketId,
 						storageIntegrationId,
@@ -709,6 +712,18 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 				const [video] = maybeVideo.value;
 
 				const [bucket] = yield* storage.getAccessForVideo(video);
+				const getDownloadUrl = (key: string) =>
+					video.hyatusOnly
+						? Effect.succeed(
+								`${HYATUS_BROWSER_RESOURCE}/api/storage/object?${new URLSearchParams(
+									{
+										videoId: video.id,
+										key,
+										token: createStorageObjectToken({ videoId: video.id, key }),
+									},
+								).toString()}`,
+							)
+						: bucket.getSignedObjectUrl(key);
 				const [videoRow] = yield* db.use((db) =>
 					db
 						.select({ isScreenshot: Db.videos.isScreenshot })
@@ -725,7 +740,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 					);
 					if (!screenshotKey) return Option.none();
 					const extension = getFileExtensionFromKey(screenshotKey) ?? "jpg";
-					const downloadUrl = yield* bucket.getSignedObjectUrl(screenshotKey);
+					const downloadUrl = yield* getDownloadUrl(screenshotKey);
 					return Option.some({
 						fileName: `${video.name}.${extension}`,
 						downloadUrl,
@@ -743,9 +758,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 						Option.isSome(mp4Head) &&
 						(mp4Head.value.ContentLength ?? 0) > 0
 					) {
-						const downloadUrl = yield* bucket.getSignedObjectUrl(
-							src.getFileKey(),
-						);
+						const downloadUrl = yield* getDownloadUrl(src.getFileKey());
 
 						return Option.some({
 							fileName: `${video.name}.mp4`,
@@ -761,9 +774,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 					);
 
 					if (upload?.rawFileKey) {
-						const downloadUrl = yield* bucket.getSignedObjectUrl(
-							upload.rawFileKey,
-						);
+						const downloadUrl = yield* getDownloadUrl(upload.rawFileKey);
 						const extension =
 							getFileExtensionFromKey(upload.rawFileKey) ?? "mp4";
 
@@ -777,7 +788,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 				if (!src) return Option.none();
 				if (!(src instanceof Video.Mp4Source)) return Option.none();
 
-				const downloadUrl = yield* bucket.getSignedObjectUrl(src.getFileKey());
+				const downloadUrl = yield* getDownloadUrl(src.getFileKey());
 				return Option.some({ fileName: `${video.name}.mp4`, downloadUrl });
 			}),
 
@@ -789,11 +800,21 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 				const [video] = maybeVideo.value;
 
 				const [bucket] = yield* storage.getAccessForVideo(video);
+				const getThumbnailUrl = (key: string) =>
+					video.hyatusOnly
+						? Effect.succeed(
+								`${HYATUS_BROWSER_RESOURCE}/api/storage/object?${new URLSearchParams(
+									{
+										videoId: video.id,
+										key,
+										token: createStorageObjectToken({ videoId: video.id, key }),
+									},
+								).toString()}`,
+							)
+						: bucket.getSignedObjectUrl(key);
 				const publishedThumbnail = getPublishedRecordingThumbnailKey(video);
 				if (publishedThumbnail) {
-					return Option.some(
-						yield* bucket.getSignedObjectUrl(publishedThumbnail),
-					);
+					return Option.some(yield* getThumbnailUrl(publishedThumbnail));
 				}
 				const listResponse = yield* bucket.listObjects({
 					prefix: `${video.ownerId}/${video.id}/`,
@@ -801,7 +822,7 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 				const contents = listResponse.Contents || [];
 				const thumbnailKey = findScreenshotObjectKey(contents);
 				if (!thumbnailKey) return Option.none();
-				const url = yield* bucket.getSignedObjectUrl(thumbnailKey);
+				const url = yield* getThumbnailUrl(thumbnailKey);
 				return Option.some(url);
 			}),
 

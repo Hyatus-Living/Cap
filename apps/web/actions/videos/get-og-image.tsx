@@ -18,7 +18,8 @@ export async function generateVideoOgImage(videoId: Video.VideoId) {
 	const { video, ownerName } = videoData;
 
 	if (video.password) return renderVideoOg({ kind: "password" });
-	if (video.public === false) return renderVideoOg({ kind: "locked" });
+	if (video.public === false || video.hyatusOnly)
+		return renderVideoOg({ kind: "locked" });
 
 	let screenshotUrl: string | undefined;
 

@@ -3,10 +3,10 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videos } from "@cap/database/schema";
-import { Storage } from "@cap/web-backend";
+import { provideOptionalAuth, Storage, Videos } from "@cap/web-backend";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
-import { Option } from "effect";
+import { Effect, Option } from "effect";
 import { revalidatePath } from "next/cache";
 import { runPromise } from "@/lib/server";
 import { updateVttEntryText } from "@/lib/transcript-vtt";
@@ -42,6 +42,19 @@ export async function editTranscriptEntry(
 	}
 
 	const { video } = result;
+	if (video.hyatusOnly) {
+		try {
+			await Effect.gen(function* () {
+				const videos = yield* Videos;
+				yield* videos.getByIdForViewing(videoId);
+			}).pipe(provideOptionalAuth, runPromise);
+		} catch {
+			return {
+				success: false,
+				message: "You don't have permission to edit this transcript",
+			};
+		}
+	}
 
 	if (video.ownerId !== userId) {
 		return {

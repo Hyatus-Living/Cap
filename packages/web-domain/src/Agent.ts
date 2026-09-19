@@ -247,6 +247,7 @@ export const AgentCapSummary = Schema.Struct({
 	access: Schema.Literal("owned", "shared"),
 	sharing: Schema.Struct({
 		public: Schema.Boolean,
+		hyatusOnly: Schema.Boolean,
 		protected: Schema.Boolean,
 	}),
 	counts: Schema.Struct({
@@ -478,12 +479,14 @@ export const AgentFeedbackResponse = Schema.Struct({
 export const AgentCapUpdateInput = Schema.Struct({
 	title: Schema.optional(Schema.String),
 	public: Schema.optional(Schema.Boolean),
+	hyatusOnly: Schema.optional(Schema.Boolean),
 });
 
 export const AgentCapUpdateResponse = Schema.Struct({
 	id: VideoId,
 	title: Schema.String,
 	public: Schema.Boolean,
+	hyatusOnly: Schema.Boolean,
 	updatedAt: Schema.String,
 	requestId: Schema.String,
 });

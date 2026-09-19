@@ -9,6 +9,7 @@ import {
 	developerApps,
 	developerCreditAccounts,
 } from "@cap/database/schema";
+import { canMintPersistentCredential } from "@cap/web-backend";
 import { hashKey } from "@/lib/developer-key-hash";
 
 export async function createDeveloperApp(data: {
@@ -17,6 +18,7 @@ export async function createDeveloperApp(data: {
 }) {
 	const user = await getCurrentUser();
 	if (!user) throw new Error("Unauthorized");
+	if (!canMintPersistentCredential(user)) throw new Error("Forbidden");
 
 	if (!data.name.trim()) throw new Error("App name is required");
 

@@ -141,6 +141,7 @@ const createProps = (
 		fps: 30,
 		metadata: null,
 		public: true,
+		hyatusOnly: false,
 		settings: null,
 		transcriptionStatus: null,
 		source,

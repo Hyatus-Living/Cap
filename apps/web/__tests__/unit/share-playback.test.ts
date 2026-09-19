@@ -32,6 +32,14 @@ const video = {
 } as unknown as Parameters<typeof getSharePlaybackUrl>[0];
 
 describe("share page playback URL", () => {
+	it("keeps Hyatus playback behind the authenticated playlist route", async () => {
+		expect(await getSharePlaybackUrl({ ...video, hyatusOnly: true })).toBe(
+			"https://videos.gptguest.com/api/playlist?videoId=video&videoType=mp4",
+		);
+		expect(mocks.access).not.toHaveBeenCalled();
+		expect(mocks.sign).not.toHaveBeenCalled();
+	});
+
 	it.each(["desktopMP4", "webMP4"] as const)(
 		"resolves %s through the existing storage access using the loaded video",
 		async (type) => {
