@@ -54,7 +54,7 @@ export class AgentPrincipal extends Context.Tag("AgentPrincipal")<
 		activeOrganizationId: OrganisationId;
 		scopes: ReadonlySet<AgentScope>;
 		tokenId: string;
-		tokenKind: "agent" | "legacy";
+		tokenKind: "agent" | "legacy" | "delegated";
 		expiresAt: Date | null;
 	}
 >() {}
@@ -423,7 +423,7 @@ export const AgentTokenResponse = Schema.Struct({
 
 export const AgentAuthStatusResponse = Schema.Struct({
 	authenticated: Schema.Literal(true),
-	tokenKind: Schema.Literal("agent", "legacy"),
+	tokenKind: Schema.Literal("agent", "legacy", "delegated"),
 	expiresAt: Schema.NullOr(Schema.String),
 	scopes: Schema.Array(AgentScope),
 	requestId: Schema.String,
@@ -431,6 +431,15 @@ export const AgentAuthStatusResponse = Schema.Struct({
 
 export const AgentRevokeResponse = Schema.Struct({
 	revoked: Schema.Boolean,
+	requestId: Schema.String,
+});
+
+export const AgentHyatusLinkInput = Schema.Struct({
+	delegatedToken: Schema.String,
+});
+
+export const AgentHyatusLinkResponse = Schema.Struct({
+	linked: Schema.Literal(true),
 	requestId: Schema.String,
 });
 
@@ -2243,6 +2252,16 @@ export class AgentAuthHttpApi extends HttpApiGroup.make("agentAuth")
 		HttpApiEndpoint.post("revokeToken", "/auth/revoke")
 			.addSuccess(AgentRevokeResponse)
 			.addError(AgentAuthenticationError)
+			.addError(AgentTemporaryUnavailableError)
+			.middleware(AgentHttpAuthMiddleware),
+	)
+	.add(
+		HttpApiEndpoint.post("linkHyatusIdentity", "/auth/hyatus/link")
+			.setPayload(AgentHyatusLinkInput)
+			.addSuccess(AgentHyatusLinkResponse)
+			.addError(AgentAuthenticationError)
+			.addError(AgentForbiddenError)
+			.addError(AgentConflictError)
 			.addError(AgentTemporaryUnavailableError)
 			.middleware(AgentHttpAuthMiddleware),
 	) {}

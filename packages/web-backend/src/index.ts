@@ -7,6 +7,7 @@ export * from "./Database.ts";
 export * from "./Extension/index.ts";
 export { Folders } from "./Folders/index.ts";
 export { HttpLive } from "./Http/Live.ts";
+export * from "./HyatusCapAuth.ts";
 export { ImageUploads } from "./ImageUploads/index.ts";
 export { Organisations } from "./Organisations/index.ts";
 export { OrganisationsPolicy } from "./Organisations/OrganisationsPolicy.ts";

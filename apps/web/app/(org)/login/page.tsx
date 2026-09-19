@@ -46,6 +46,11 @@ export default async function LoginPage(props: {
 		redirect(getSafeNextPath(searchParams.next, serverEnv().WEB_URL));
 	}
 
+	const sourceRevision = serverEnv().CAP_SOURCE_REVISION;
+	const sourceUrl = sourceRevision
+		? `https://github.com/Hyatus-Living/Cap/tree/${sourceRevision}`
+		: "https://github.com/Hyatus-Living/Cap";
+
 	return (
 		<div className="flex relative justify-center items-center w-full h-screen bg-gray-2">
 			<div className="flex absolute top-10 left-10 gap-2 justify-center items-center transition-opacity hover:opacity-75">
@@ -57,7 +62,7 @@ export default async function LoginPage(props: {
 					Home
 				</Link>
 			</div>
-			<LoginForm />
+			<LoginForm sourceUrl={sourceUrl} />
 		</div>
 	);
 }

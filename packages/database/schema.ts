@@ -138,6 +138,24 @@ export const users = mysqlTable(
 	}),
 );
 
+export const hyatusCapIdentities = mysqlTable(
+	"hyatus_cap_identities",
+	{
+		id: nanoId("id").notNull().primaryKey(),
+		hyatusSubject: varchar("hyatusSubject", { length: 255 }).notNull(),
+		userId: nanoId("userId").notNull().$type<User.UserId>(),
+		emailAtLink: varchar("emailAtLink", { length: 255 }).notNull(),
+		createdAt: timestamp("createdAt").notNull().defaultNow(),
+		updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
+	},
+	(table) => ({
+		hyatusSubjectIndex: uniqueIndex("hyatus_cap_subject_idx").on(
+			table.hyatusSubject,
+		),
+		userIdIndex: uniqueIndex("hyatus_cap_user_id_idx").on(table.userId),
+	}),
+);
+
 export const loopsSyncJobs = mysqlTable(
 	"loops_sync_jobs",
 	{
@@ -1116,7 +1134,18 @@ export const usersRelations = relations(users, ({ many, one }) => ({
 	messengerMessages: many(messengerMessages),
 	messengerSupportEmails: many(messengerSupportEmails),
 	integrationInstallations: many(integrationInstallations),
+	hyatusCapIdentity: one(hyatusCapIdentities),
 }));
+
+export const hyatusCapIdentitiesRelations = relations(
+	hyatusCapIdentities,
+	({ one }) => ({
+		user: one(users, {
+			fields: [hyatusCapIdentities.userId],
+			references: [users.id],
+		}),
+	}),
+);
 
 export const accountsRelations = relations(accounts, ({ one }) => ({
 	user: one(users, {

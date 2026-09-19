@@ -6,6 +6,12 @@ import { HttpServerRequest } from "@effect/platform";
 import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { Database } from "./Database.ts";
+import {
+	hyatusCapTokenId,
+	introspectHyatusCapToken,
+	isHyatusCapDelegatedToken,
+	resolveHyatusCapIdentity,
+} from "./HyatusCapAuth.ts";
 
 const requestId = () => crypto.randomUUID();
 
@@ -22,6 +28,16 @@ const tokenExpired = () =>
 	new Agent.AgentAuthenticationError({
 		code: "TOKEN_EXPIRED",
 		message: "The Cap CLI credential has expired or been revoked",
+		retryable: false,
+		retryAfterMs: null,
+		requestId: requestId(),
+	});
+
+const linkRequired = () =>
+	new Agent.AgentAuthenticationError({
+		code: "AUTH_REQUIRED",
+		message:
+			"A Cap account already uses this verified email. Link it at /api/v1/auth/hyatus/link before using the delegated credential",
 		retryable: false,
 		retryAfterMs: null,
 		requestId: requestId(),
@@ -107,6 +123,36 @@ export const AgentHttpAuthMiddlewareLive = Layer.effect(
 				);
 				const token = parseBearerToken(headers.authorization);
 				if (!token) return yield* authRequired();
+
+				if (isHyatusCapDelegatedToken(token)) {
+					const context = yield* introspectHyatusCapToken(token).pipe(
+						Effect.mapError((error) =>
+							error.kind === "unavailable"
+								? temporarilyUnavailable()
+								: tokenExpired(),
+						),
+					);
+					if (isBlockedAccountEmail(context.email)) {
+						return yield* authRequired();
+					}
+					const resolved = yield* resolveHyatusCapIdentity(database, context);
+					if (resolved.state === "link_required") return yield* linkRequired();
+					if (
+						resolved.state === "invalid_binding" ||
+						isBlockedAccountEmail(resolved.user.email)
+					) {
+						return yield* authRequired();
+					}
+					return Agent.AgentPrincipal.of({
+						id: resolved.user.id,
+						email: resolved.user.email,
+						activeOrganizationId: resolved.user.activeOrganizationId,
+						scopes: context.scopes,
+						tokenId: hyatusCapTokenId(token),
+						tokenKind: "delegated",
+						expiresAt: context.expiresAt,
+					});
+				}
 
 				if (/^cap_cli_[A-Za-z0-9_-]{43}$/.test(token)) {
 					const [row] = yield* database.use((db) =>
