@@ -20,8 +20,8 @@ export const dynamic = "force-dynamic";
 
 const sessionCookieName = "next-auth.session-token";
 
-const errorResponse = (request: NextRequest, error: string) => {
-	const target = new URL("/login", request.url);
+const errorResponse = (_request: NextRequest, error: string) => {
+	const target = new URL("/login", serverEnv().WEB_URL);
 	target.searchParams.set("error", error);
 	const response = NextResponse.redirect(target);
 	response.cookies.set(HYATUS_BROWSER_INTENT_COOKIE, "", {
@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
 		},
 	});
 	const response = NextResponse.redirect(
-		new URL(safeReturnPath(intent.returnTo), request.url),
+		new URL(safeReturnPath(intent.returnTo), serverEnv().WEB_URL),
 	);
 	response.headers.set("Cache-Control", "private, no-store");
 	response.cookies.set(sessionCookieName, sessionToken, {
