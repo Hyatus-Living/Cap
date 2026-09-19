@@ -117,21 +117,47 @@ describe.runIf(Boolean(databaseUrl))(
 		});
 
 		it("serializes concurrent provisioning to one subject mapping", async () => {
-			const delegated = context(`subject-${id()}`, `${id()}@hyatus.com`);
-			const resolved = await Promise.all(
-				Array.from({ length: 8 }, () =>
-					resolveHyatusCapIdentityWithDb(database(), delegated),
-				),
-			);
-			const userIds = resolved.map((result) =>
-				result.state === "resolved" ? result.user.id : result.state,
-			);
-			expect(new Set(userIds).size).toBe(1);
+			for (let round = 0; round < 5; round += 1) {
+				const delegated = context(`subject-${id()}`, `${id()}@hyatus.com`);
+				const resolved = await Promise.all(
+					Array.from({ length: 8 }, () =>
+						resolveHyatusCapIdentityWithDb(database(), delegated),
+					),
+				);
+				const userIds = resolved.map((result) =>
+					result.state === "resolved" ? result.user.id : result.state,
+				);
+				expect(new Set(userIds).size).toBe(1);
+				expect(
+					await database()
+						.select()
+						.from(hyatusCapIdentities)
+						.where(eq(hyatusCapIdentities.hyatusSubject, delegated.subject)),
+				).toHaveLength(1);
+			}
+		});
+
+		it("does not auto-link concurrent subjects with the same email", async () => {
+			const email = `${id()}@hyatus.com`;
+			const first = context(`subject-${id()}`, email);
+			const second = context(`subject-${id()}`, email);
+			const results = await Promise.all([
+				resolveHyatusCapIdentityWithDb(database(), first),
+				resolveHyatusCapIdentityWithDb(database(), second),
+			]);
+
+			expect(results.map((result) => result.state).sort()).toEqual([
+				"link_required",
+				"resolved",
+			]);
+			expect(
+				await database().select().from(users).where(eq(users.email, email)),
+			).toHaveLength(1);
 			expect(
 				await database()
 					.select()
 					.from(hyatusCapIdentities)
-					.where(eq(hyatusCapIdentities.hyatusSubject, delegated.subject)),
+					.where(eq(hyatusCapIdentities.emailAtLink, email)),
 			).toHaveLength(1);
 		});
 
@@ -144,12 +170,12 @@ describe.runIf(Boolean(databaseUrl))(
 				await resolveHyatusCapIdentityWithDb(database(), delegated),
 			).toEqual({ state: "link_required" });
 			expect(
-				await linkHyatusCapIdentityWithDb(
-					database(),
-					delegated,
-					existing.userId,
+				await Promise.all(
+					Array.from({ length: 8 }, () =>
+						linkHyatusCapIdentityWithDb(database(), delegated, existing.userId),
+					),
 				),
-			).toEqual({ state: "linked" });
+			).toEqual(Array.from({ length: 8 }, () => ({ state: "linked" })));
 			const resolved = await resolveHyatusCapIdentityWithDb(
 				database(),
 				delegated,

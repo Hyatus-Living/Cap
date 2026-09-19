@@ -196,46 +196,33 @@ export type ResolveHyatusCapIdentityResult =
 	| { state: "link_required" }
 	| { state: "invalid_binding" };
 
-export const resolveHyatusCapIdentityWithDb = (
+export const resolveHyatusCapIdentityWithDb = async (
 	db: DbClient,
 	context: HyatusCapContext,
-) =>
-	db.transaction(async (tx): Promise<ResolveHyatusCapIdentityResult> => {
-		const selectBoundUser = async () => {
-			const [row] = await tx
-				.select({
-					id: Db.users.id,
-					email: Db.users.email,
-					activeOrganizationId: Db.users.activeOrganizationId,
-				})
-				.from(Db.hyatusCapIdentities)
-				.innerJoin(Db.users, eq(Db.hyatusCapIdentities.userId, Db.users.id))
-				.where(eq(Db.hyatusCapIdentities.hyatusSubject, context.subject))
-				.for("update")
-				.limit(1);
-			return row;
+): Promise<ResolveHyatusCapIdentityResult> => {
+	const [existing] = await db
+		.select({
+			id: Db.users.id,
+			email: Db.users.email,
+			activeOrganizationId: Db.users.activeOrganizationId,
+		})
+		.from(Db.hyatusCapIdentities)
+		.innerJoin(Db.users, eq(Db.hyatusCapIdentities.userId, Db.users.id))
+		.where(eq(Db.hyatusCapIdentities.hyatusSubject, context.subject))
+		.limit(1);
+	if (existing) {
+		if (!existing.activeOrganizationId) return { state: "invalid_binding" };
+		return {
+			state: "resolved",
+			user: {
+				id: existing.id,
+				email: existing.email,
+				activeOrganizationId: existing.activeOrganizationId,
+			},
 		};
+	}
 
-		const existing = await selectBoundUser();
-		if (existing) {
-			if (!existing.activeOrganizationId) return { state: "invalid_binding" };
-			return {
-				state: "resolved",
-				user: {
-					id: existing.id,
-					email: existing.email,
-					activeOrganizationId: existing.activeOrganizationId,
-				},
-			};
-		}
-
-		const [emailOwner] = await tx
-			.select({ id: Db.users.id })
-			.from(Db.users)
-			.where(eq(Db.users.email, context.email))
-			.limit(1);
-		if (emailOwner) return { state: "link_required" };
-
+	return db.transaction(async (tx): Promise<ResolveHyatusCapIdentityResult> => {
 		const userId = User.UserId.make(nanoId());
 		const organizationId = Organisation.OrganisationId.make(nanoId());
 
@@ -261,7 +248,17 @@ export const resolveHyatusCapIdentityWithDb = (
 			.limit(1);
 		if (!claimed) return { state: "invalid_binding" };
 		if (claimed.userId !== userId) {
-			const concurrent = await selectBoundUser();
+			const [concurrent] = await tx
+				.select({
+					id: Db.users.id,
+					email: Db.users.email,
+					activeOrganizationId: Db.users.activeOrganizationId,
+				})
+				.from(Db.hyatusCapIdentities)
+				.innerJoin(Db.users, eq(Db.hyatusCapIdentities.userId, Db.users.id))
+				.where(eq(Db.hyatusCapIdentities.hyatusSubject, context.subject))
+				.for("update")
+				.limit(1);
 			if (!concurrent?.activeOrganizationId) {
 				return { state: "invalid_binding" };
 			}
@@ -327,6 +324,7 @@ export const resolveHyatusCapIdentityWithDb = (
 			},
 		};
 	});
+};
 
 export const resolveHyatusCapIdentity = (
 	database: Database,
