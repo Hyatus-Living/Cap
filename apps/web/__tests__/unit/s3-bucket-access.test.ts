@@ -118,12 +118,12 @@ describe("S3 object streaming", () => {
 				controller = value;
 			},
 		});
-		send.mockResolvedValue({
+		send.mockImplementation(async () => ({
 			Body: { transformToWebStream: () => stream },
 			ContentType: "video/mp4",
 			ContentLength: 4,
 			$metadata: { httpStatusCode: 200 },
-		});
+		}));
 		const response = await Effect.runPromise(
 			access.getObjectResponse("video.mp4"),
 		);
@@ -140,13 +140,13 @@ describe("S3 object streaming", () => {
 	it("passes range, exact identity, and cancellation to the internal client", async () => {
 		const { access, send } = await fixture();
 		const controller = new AbortController();
-		send.mockResolvedValue({
+		send.mockImplementation(async () => ({
 			Body: { transformToWebStream: () => new Response("data").body },
 			ContentType: "video/mp4",
 			ContentLength: 4,
 			ContentRange: "bytes 10-13/100",
 			$metadata: { httpStatusCode: 206 },
-		});
+		}));
 		const response = await Effect.runPromise(
 			access.getObjectResponse("video.mp4", "bytes=10-13", {
 				objectIdentity: '"version-1"',
@@ -201,7 +201,9 @@ describe("S3 object streaming", () => {
 
 	it("does not silently return an empty video when storage omits the body", async () => {
 		const { access, send } = await fixture();
-		send.mockResolvedValue({ $metadata: { httpStatusCode: 200 } });
+		send.mockImplementation(async () => ({
+			$metadata: { httpStatusCode: 200 },
+		}));
 		await expect(
 			Effect.runPromise(access.getObjectResponse("video.mp4")),
 		).rejects.toThrow();
