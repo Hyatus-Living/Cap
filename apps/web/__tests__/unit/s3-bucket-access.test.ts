@@ -1,7 +1,7 @@
 import * as S3 from "@aws-sdk/client-s3";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
 	createS3BucketAccess,
@@ -87,5 +87,123 @@ describe("getRequestAccessibleS3Endpoint", () => {
 		} finally {
 			client.destroy();
 		}
+	});
+});
+
+describe("S3 object streaming", () => {
+	async function fixture() {
+		const client = new S3.S3Client({
+			credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+			region: "us-east-1",
+		});
+		const send = vi.spyOn(client, "send");
+		const access = await Effect.runPromise(
+			createS3BucketAccess.pipe(
+				Effect.provideService(S3BucketClientProvider, {
+					bucket: "private-videos",
+					getInternal: Effect.succeed(client),
+					getPublic: Effect.die("Public storage must not be used"),
+					isPathStyle: false,
+				}),
+			),
+		);
+		return { access, send };
+	}
+
+	it("returns a stream before the full object is available", async () => {
+		const { access, send } = await fixture();
+		let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+		const stream = new ReadableStream<Uint8Array>({
+			start(value) {
+				controller = value;
+			},
+		});
+		send.mockResolvedValue({
+			Body: { transformToWebStream: () => stream },
+			ContentType: "video/mp4",
+			ContentLength: 4,
+			$metadata: { httpStatusCode: 200 },
+		});
+		const response = await Effect.runPromise(
+			access.getObjectResponse("video.mp4"),
+		);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Content-Type")).toBe("video/mp4");
+		expect(response.headers.get("Content-Length")).toBe("4");
+		expect(response.headers.get("Accept-Ranges")).toBe("bytes");
+		expect(response.body).toBe(stream);
+		controller?.enqueue(new TextEncoder().encode("data"));
+		controller?.close();
+		expect(await response.text()).toBe("data");
+	});
+
+	it("passes range, exact identity, and cancellation to the internal client", async () => {
+		const { access, send } = await fixture();
+		const controller = new AbortController();
+		send.mockResolvedValue({
+			Body: { transformToWebStream: () => new Response("data").body },
+			ContentType: "video/mp4",
+			ContentLength: 4,
+			ContentRange: "bytes 10-13/100",
+			$metadata: { httpStatusCode: 206 },
+		});
+		const response = await Effect.runPromise(
+			access.getObjectResponse("video.mp4", "bytes=10-13", {
+				objectIdentity: '"version-1"',
+				signal: controller.signal,
+			}),
+		);
+		expect(send).toHaveBeenCalledWith(
+			expect.objectContaining({
+				input: {
+					Bucket: "private-videos",
+					Key: "video.mp4",
+					Range: "bytes=10-13",
+					IfMatch: '"version-1"',
+				},
+			}),
+			{ abortSignal: controller.signal },
+		);
+		expect(response.status).toBe(206);
+		expect(response.headers.get("Content-Range")).toBe("bytes 10-13/100");
+		expect(await response.text()).toBe("data");
+		controller.abort();
+		expect(send.mock.calls[0]?.[1]?.abortSignal?.aborted).toBe(true);
+	});
+
+	it.each([404, 412, 416])(
+		"preserves safe storage status %s",
+		async (status) => {
+			const { access, send } = await fixture();
+			send.mockRejectedValue(
+				new S3.S3ServiceException({
+					name: "StorageFailure",
+					$fault: "client",
+					$metadata: { httpStatusCode: status },
+					message: "Private provider detail",
+				}),
+			);
+			const response = await Effect.runPromise(
+				access.getObjectResponse("video.mp4"),
+			);
+			expect(response.status).toBe(status);
+			expect(await response.text()).toBe("");
+		},
+	);
+
+	it("propagates unexpected storage failures", async () => {
+		const { access, send } = await fixture();
+		send.mockRejectedValue(new Error("Storage offline"));
+		await expect(
+			Effect.runPromise(access.getObjectResponse("video.mp4")),
+		).rejects.toThrow();
+	});
+
+	it("does not silently return an empty video when storage omits the body", async () => {
+		const { access, send } = await fixture();
+		send.mockResolvedValue({ $metadata: { httpStatusCode: 200 } });
+		await expect(
+			Effect.runPromise(access.getObjectResponse("video.mp4")),
+		).rejects.toThrow();
 	});
 });

@@ -182,12 +182,7 @@ export async function GET(request: NextRequest) {
 		}
 
 		const [storage] = yield* Storage.getAccessForVideo(video);
-		if (!("getObjectResponse" in storage)) {
-			if (video.hyatusOnly) {
-				return new Response("Protected playback is unavailable", {
-					status: 502,
-				});
-			}
+		if (storage.provider === "s3" && !video.hyatusOnly) {
 			const url = yield* storage.getSignedObjectUrl(key);
 			return Response.redirect(url);
 		}
