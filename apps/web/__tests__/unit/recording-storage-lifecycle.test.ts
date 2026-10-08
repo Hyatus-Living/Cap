@@ -335,6 +335,7 @@ async function storageFixture(seed: Iterable<readonly [string, string]>) {
 			| "list"
 			| "delete"
 			| "head"
+			| "read"
 			| "multipart-create"
 			| "multipart-part"
 			| "multipart-complete"
@@ -392,6 +393,18 @@ async function storageFixture(seed: Iterable<readonly [string, string]>) {
 		afterCopy?.();
 	};
 	vi.spyOn(client, "send").mockImplementation(async (command) => {
+		if (command instanceof S3.GetObjectCommand) {
+			const key = command.input.Key;
+			const content = key && objects.get(key);
+			if (content === undefined || !key) throw new Error("Object not found");
+			requests.push({ operation: "read", key });
+			return {
+				Body: { transformToWebStream: () => new Response(content).body },
+				ContentLength: sizes.get(key),
+				ContentType: "video/mp4",
+				$metadata: { httpStatusCode: 200 },
+			};
+		}
 		if (command instanceof S3.HeadObjectCommand) {
 			const key = command.input.Key;
 			if (!key || !objects.has(key)) throw new Error("Object not found");
@@ -797,6 +810,23 @@ afterEach(() => {
 });
 
 describe("recording storage lifecycle", () => {
+	it("streams the published S3 output through the real storage wrapper", async () => {
+		databaseFixture();
+		const fixture = await storageFixture([[outputKey, "verified-video"]]);
+		const [access] = await Effect.runPromise(
+			Effect.flatMap(Storage, (storage) =>
+				storage.getAccessForVideo(recording()),
+			).pipe(Effect.provide(Storage.Default)),
+		);
+		const response = await Effect.runPromise(
+			access.getObjectResponse(`${prefix}result.mp4`),
+		);
+		expect(await response.text()).toBe("verified-video");
+		expect(fixture.requests).toContainEqual({
+			operation: "read",
+			key: outputKey,
+		});
+	});
 	it.each(["desktopMP4", "webMP4"] as const)(
 		"uses the published %s thumbnail without discovering older objects",
 		async (type) => {

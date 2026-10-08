@@ -214,6 +214,53 @@ export const createS3BucketAccess = Effect.gen(function* () {
 					}),
 				),
 			),
+		getObjectResponse: (
+			key: string,
+			range?: string | null,
+			verification?: { objectIdentity?: string; signal?: AbortSignal },
+		) =>
+			provider.getInternal.pipe(
+				Effect.mapError((cause) => new S3Error({ cause })),
+				Effect.flatMap((client) =>
+					Effect.tryPromise({
+						try: async () => {
+							let object: S3.GetObjectCommandOutput;
+							try {
+								object = await client.send(
+									new S3.GetObjectCommand({
+										Bucket: provider.bucket,
+										Key: key,
+										Range: range ?? undefined,
+										IfMatch: verification?.objectIdentity,
+									}),
+									{ abortSignal: verification?.signal },
+								);
+							} catch (error) {
+								if (error instanceof S3.S3ServiceException) {
+									const status = error.$metadata.httpStatusCode;
+									if (status === 404 || status === 412 || status === 416) {
+										return new Response(null, { status });
+									}
+								}
+								throw error;
+							}
+							if (!object.Body) throw new Error("Storage response has no body");
+							const headers = new Headers({ "Accept-Ranges": "bytes" });
+							if (object.ContentType)
+								headers.set("Content-Type", object.ContentType);
+							if (object.ContentLength !== undefined)
+								headers.set("Content-Length", String(object.ContentLength));
+							if (object.ContentRange)
+								headers.set("Content-Range", object.ContentRange);
+							return new Response(object.Body.transformToWebStream(), {
+								status: object.ContentRange ? 206 : 200,
+								headers,
+							});
+						},
+						catch: (cause) => new S3Error({ cause }),
+					}),
+				),
+			),
 		listObjects: (config: {
 			prefix?: string;
 			maxKeys?: number;

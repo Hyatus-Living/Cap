@@ -8,10 +8,14 @@ const mocks = vi.hoisted(() => ({
 	head: vi.fn(),
 	read: vi.fn(),
 	download: vi.fn(),
+	signedUrl: vi.fn(),
+	provider: "googleDrive",
+	allowViewing: true,
 	token: null as { videoId: string; key: string } | null,
 	video: {
 		id: "video",
 		ownerId: "owner",
+		hyatusOnly: false,
 		source: { type: "desktopMP4" } as {
 			type: string;
 			outputKey?: string;
@@ -31,6 +35,8 @@ vi.mock("@cap/web-backend", async () => {
 			getAccessForVideo: () =>
 				Effect.succeed([
 					{
+						provider: mocks.provider,
+						getSignedObjectUrl: mocks.signedUrl,
 						headObject: mocks.head,
 						getObjectResponse: mocks.read,
 						getInternalDownload: mocks.download,
@@ -38,7 +44,10 @@ vi.mock("@cap/web-backend", async () => {
 				]),
 		},
 		Videos: Effect.succeed({
-			getByIdForViewing: () => Effect.succeed(Option.some([mocks.video])),
+			getByIdForViewing: () =>
+				mocks.allowViewing
+					? Effect.succeed(Option.some([mocks.video]))
+					: Effect.fail({ _tag: "PolicyDenied" }),
 		}),
 		VideosRepo: Effect.succeed({
 			getById: () => Effect.succeed(Option.some([mocks.video])),
@@ -71,6 +80,12 @@ function request(
 
 describe("recording verification object reads", () => {
 	beforeEach(() => {
+		mocks.provider = "googleDrive";
+		mocks.allowViewing = true;
+		mocks.video.hyatusOnly = false;
+		mocks.signedUrl.mockReturnValue(
+			Effect.succeed("https://storage.test/video.mp4?signed=secret"),
+		);
 		mocks.token = { videoId: "video", key: "owner/video/result.mp4" };
 		mocks.video.source = { type: "desktopMP4" };
 		mocks.head.mockReturnValue(
@@ -84,6 +99,52 @@ describe("recording verification object reads", () => {
 				}),
 			),
 		);
+	});
+
+	it("streams Hyatus-only S3 media without exposing a signed URL", async () => {
+		mocks.provider = "s3";
+		mocks.video.hyatusOnly = true;
+		const response = await request({ Range: "bytes=0-3" });
+		expect(response.status).toBe(206);
+		expect(response.headers.get("Location")).toBeNull();
+		expect(response.headers.get("Content-Range")).toBe("bytes 0-3/100");
+		expect(response.headers.get("Vary")).toBe("Cookie");
+		expect(await response.text()).toBe("data");
+		expect(mocks.signedUrl).not.toHaveBeenCalled();
+	});
+
+	it("rejects a denied Hyatus viewer even with a valid object token", async () => {
+		mocks.provider = "s3";
+		mocks.video.hyatusOnly = true;
+		mocks.allowViewing = false;
+		expect((await request()).status).toBe(404);
+		expect(mocks.read).not.toHaveBeenCalled();
+		expect(mocks.signedUrl).not.toHaveBeenCalled();
+	});
+
+	it("retains signed redirects for existing non-Hyatus S3 playback", async () => {
+		mocks.provider = "s3";
+		const response = await request();
+		expect(response.status).toBe(302);
+		expect(response.headers.get("Location")).toBe(
+			"https://storage.test/video.mp4?signed=secret",
+		);
+		expect(mocks.read).not.toHaveBeenCalled();
+	});
+
+	it("answers protected S3 HEAD without starting a download", async () => {
+		mocks.provider = "s3";
+		mocks.video.hyatusOnly = true;
+		const response = await HEAD(
+			new NextRequest(
+				"https://cap.test/api/storage/object?videoId=video&key=owner/video/result.mp4",
+				{ method: "HEAD" },
+			),
+		);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Content-Length")).toBe("100");
+		expect(await response.text()).toBe("");
+		expect(mocks.read).not.toHaveBeenCalled();
 	});
 
 	it("does not expose Drive credentials to ordinary clients", async () => {

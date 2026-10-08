@@ -429,6 +429,11 @@ const makeS3Access = (s3: S3BucketAccess) => ({
 		signingArgs?: Parameters<S3BucketAccess["getInternalSignedObjectUrl"]>[1],
 	) => mapStorageError(s3.getInternalSignedObjectUrl(key, signingArgs)),
 	getObject: (key: string) => mapStorageError(s3.getObject(key)),
+	getObjectResponse: (
+		key: string,
+		range?: string | null,
+		verification?: { objectIdentity?: string; signal?: AbortSignal },
+	) => mapStorageError(s3.getObjectResponse(key, range, verification)),
 	listObjects: (input: {
 		prefix?: string;
 		maxKeys?: number;
@@ -1089,6 +1094,11 @@ function withPublishedRecordingOutput<
 	const shared = {
 		...access,
 		getObject: (key: string) => access.getObject(resolve(key)),
+		getObjectResponse: (
+			key: string,
+			range?: string | null,
+			verification?: GoogleDriveRecordingRead | { signal: AbortSignal },
+		) => access.getObjectResponse(resolve(key), range, verification),
 		headObject: (key: string) => access.headObject(resolve(key)),
 		getSignedObjectUrl: (
 			key: string,
@@ -1112,11 +1122,6 @@ function withPublishedRecordingOutput<
 				key: string,
 				verification: { objectIdentity?: string; signal?: AbortSignal },
 			) => access.getInternalDownload(resolve(key), verification),
-			getObjectResponse: (
-				key: string,
-				range?: string | null,
-				verification?: GoogleDriveRecordingRead,
-			) => access.getObjectResponse(resolve(key), range, verification),
 		});
 	}
 	return Object.assign({}, access, shared);
